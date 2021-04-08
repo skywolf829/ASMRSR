@@ -5,8 +5,8 @@ class Options():
     def get_default():
         opt = {}
         # Input info
-        opt["mode"]                    = "3D"      # What SinGAN to use - 2D or 3D
-        opt["data_folder"]             = "InputData/iso1024"
+        opt["mode"]                    = "2D"      # What SinGAN to use - 2D or 3D
+        opt["data_folder"]             = "TrainingData/isomag2D"
         opt['scaling_mode']            = None # magnitude, channel, learned, none
         opt['load_data_at_start']      = False
         opt['single_shot']            =  False
@@ -15,7 +15,7 @@ class Options():
         opt["num_channels"]            = 1
         opt["spatial_downscale_ratio"] = 0.5       # Spatial downscale ratio between levels
         opt["min_dimension_size"]      = 16        # Smallest a dimension can go to upscale from
-        opt["cropping_resolution"]     = 96
+        opt["cropping_resolution"]     = 1024
         opt["train_date_time"]         = None      # The day/time the model was trained (finish time)
         
         opt['dataset_name']            = "isotropic1024coarse"
@@ -55,7 +55,6 @@ class Options():
 
         opt['scale_factor_start']      = 1.1
         opt['scale_factor_end']        = 8.0
-        opt['scale_factor_stride']     = 0.1
 
         opt["train_distributed"]       = False
         opt["device"]                  = "cuda:0"

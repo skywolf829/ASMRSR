@@ -1,9 +1,9 @@
-from Code.utility_functions import str2bool
-from Code.options import *
-from Code.datasets import LocalDataset
-from Code.models import load_model
-from Code.train import Trainer
-from Code.models import MSR_Generator
+from utility_functions import str2bool
+from options import *
+from datasets import LocalDataset
+from models import load_model
+from train import Trainer
+from models import MSR_Generator
 import argparse
 import os
 

@@ -1,10 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from Code.utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init
+from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init
 import os
-from Code.options import save_options, load_options, Options
-
+from options import save_options, load_options, Options
+import numpy as np
+from math import ceil
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
 
@@ -245,6 +246,8 @@ class MSR_Generator(nn.Module):
         self.apply(weights_init)
 
     def forward(self, x, scale_factor):
+        print("Input shape " + str(x.shape))
+        n_chans = x.shape[1]
         x = self.c1(x)
         features = x.clone()
         for i, mod in enumerate(self.blocks):
@@ -252,13 +255,18 @@ class MSR_Generator(nn.Module):
             
         features = self.c2(features)
         features = x + features
+        print("Features shape : " + str(features.shape))
 
-        out_shape = x.shape
-        for i in range(2, len(x.shape)):
-            out_shape[i] = int(out_shape[i]*scale_factor)
+        out_shape = list(x.shape)
+        out_shape[1] = n_chans
+        for i in range(2, len(out_shape)):
+            out_shape[i] = ceil(out_shape[i]*scale_factor)
         out = torch.zeros(out_shape, device=x.device, dtype=x.dtype)
+        print("Out shape: " + str(out.shape))
 
-        sf_inds = torch.tensor(scale_factor, dtype=x.dtype, device=x.device).view(1, 1)  
+        sf_inds = torch.from_numpy(np.array(scale_factor))
+        sf_inds.type = x.dtype
+        sf_inds = sf_inds.to(x.device).view(1, 1)  
         x_inds = torch.arange(0, out_shape[2], dtype=x.dtype, device=x.device).view(out_shape[2], 1)  
         y_inds = torch.arange(0, out_shape[3], dtype=x.dtype, device=x.device).view(out_shape[3], 1)  
         if(self.opt['mode'] == "2D"):
@@ -278,29 +286,33 @@ class MSR_Generator(nn.Module):
         weights = self.lrelu(weights)
         weights = self.fc2(weights)
         if(self.opt['mode'] == "2D"):
-            weights = torch.reshape(weights, [x.shape[0], out_shape[1], out_shape[2], out_shape[3], self.opt['base_num_kernels'], 
+            weights = torch.reshape(weights, [out_shape[0], out_shape[1], out_shape[2], out_shape[3], self.opt['base_num_kernels'], 
                 self.opt['kernel_size'], self.opt['kernel_size']])
         elif(self.opt['mode'] == "3D"):
-            weights = torch.reshape(weights, [x.shape[0], out_shape[1], out_shape[2], out_shape[3], out_shape[4],
+            weights = torch.reshape(weights, [out_shape[0], out_shape[1], out_shape[2], out_shape[3], out_shape[4],
                 self.opt['base_num_kernels'], self.opt['kernel_size'], self.opt['kernel_size']])
-        
+        print("Weights shape: " + str(weights.shape))
         half_k_size = int(self.opt['kernel_size']/2)
         for i in range(out.shape[2]):
             i_prime = int(i/scale_factor)
+            i_s = min(max(0, i_prime-half_k_size), features.shape[2] - self.opt['kernel_size'])
+            i_e = min(i_s+self.opt['kernel_size'], out.shape[2])
             for j in range(out.shape[3]):
                 j_prime = int(j/scale_factor)
+                j_s = min(max(0, j_prime-half_k_size), features.shape[3]-self.opt['kernel_size'])
+                j_e = min(j_s+self.opt['kernel_size'], out.shape[3])
                 if(self.opt['mode'] == "2D"):                    
-                    for c in range(out.shape[1]):
-                        out[:,c,i,j] = weights[:,c,i,j,:,:,:] * \
-                            features[:,:,i_prime-half_k_size:i_prime+half_k_size+1,j_prime-half_k_size:j_prime+half_k_size+1]
+                    for c in range(out_shape[1]):
+                        out[:,c,i,j] = (weights[:,c,i,j,:,:,:] * \
+                            features[:,:,i_s:i_e,j_s:j_e]).sum()
                 elif(self.opt['mode'] == "3D"):
                     for k in range(out.shape[4]):                        
                         k_prime = int(k/scale_factor)
-                        for c in range(out.shape[1]):
-                            out[:,c,i,j,k] = weights[:,c,i,j,k,:,:,:] * \
-                                features[:,:,i_prime-half_k_size:i_prime+half_k_size+1,
-                                j_prime-half_k_size:j_prime+half_k_size+1,
-                                k_prime-half_k_size:k_prime+half_k_size+1]
+                        k_s = max(0, k_prime-half_k_size)
+                        k_e = min(k_s+self.opt['kernel_size'], out.shape[4])
+                        for c in range(n_chans):
+                            out[:,c,i,j,k] = (weights[:,c,i,j,k,:,:,:] * \
+                                features[:,:,i_s:i_e,j_s:j_e,k_s:k_e]).sum()
 
         return out
 

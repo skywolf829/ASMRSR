@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 import h5py
 import torch.nn.functional as F
-from Code.utility_functions import AvgPool2D, AvgPool3D
+from utility_functions import AvgPool2D, AvgPool3D
 
 class LocalDataset(torch.utils.data.Dataset):
     def __init__(self, opt):

@@ -8,7 +8,7 @@ from torch.utils.tensorboard import SummaryWriter
 import time
 import torch.optim as optim
 import os
-from Code.models import save_model
+from models import save_model
 
 class Trainer():
     def __init__(self, opt):
@@ -50,7 +50,9 @@ class Trainer():
             for batch_num, real_hr in enumerate(dataloader):
                 model.zero_grad()
                 real_hr = real_hr.to(opt['device'])
-                scale_factor = torch.rand([1]) * (opt['scale_factor_start'] - opt['scale_factor_end']) + opt['scale_factor_start']
+                scale_factor = torch.rand([1]) * \
+                    (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
+                        opt['scale_factor_start']
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
                     mode = "bilinear" if opt['mode'] == "2D" else "trilinear")
 
@@ -98,9 +100,15 @@ class Trainer():
             for batch_num, real_hr in enumerate(dataloader):
                 model.zero_grad()
                 real_hr = real_hr.to(self.opt['device'])
-                scale_factor = torch.rand([1]) * (self.opt['scale_factor_start'] - self.opt['scale_factor_end']) + self.opt['scale_factor_start']
+                print("Full shape : " + str(real_hr.shape))
+                scale_factor = torch.rand([1]) * \
+                    (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
+                        self.opt['scale_factor_start']
+                print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
-                    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear")
+                    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+                    align_corners=True, recompute_scale_factor=True)
+                print("LR shape : " + str(real_lr.shape))
 
                 lr_upscaled = model(real_lr, scale_factor)
 
