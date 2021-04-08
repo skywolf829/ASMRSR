@@ -8,7 +8,7 @@ from Code.options import save_options, load_options, Options
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
 
-input_folder = os.path.join(project_folder_path, "InputData")
+input_folder = os.path.join(project_folder_path, "TrainingData")
 output_folder = os.path.join(project_folder_path, "Output")
 save_folder = os.path.join(project_folder_path, "SavedModels")
 
