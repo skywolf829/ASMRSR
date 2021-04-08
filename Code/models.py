@@ -308,7 +308,7 @@ class MSR_Generator(nn.Module):
                 elif(self.opt['mode'] == "3D"):
                     for k in range(out.shape[4]):                        
                         k_prime = int(k/scale_factor)
-                        k_s = max(0, k_prime-half_k_size)
+                        k_s = min(max(0, k_prime-half_k_size), features.shape[4]-self.opt['kernel_size'])
                         k_e = min(k_s+self.opt['kernel_size'], out.shape[4])
                         for c in range(n_chans):
                             out[:,c,i,j,k] = (weights[:,c,i,j,k,:,:,:] * \
