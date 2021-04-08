@@ -127,3 +127,22 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Other
+/SavedModels
+/InputData
+/Other
+/Output
+/tensorboard
+/TestingData
+.vscode/settings.json
+*.npy
+*.png
+*.gif
+*.out
+*.nc
+*.jpg
+*.jpeg
+*.torch
+*.dat
+nohup.out
