@@ -130,7 +130,7 @@ dmypy.json
 
 # Other
 /SavedModels
-/InputData
+/TrainingData
 /Other
 /Output
 /tensorboard
