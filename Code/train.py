@@ -62,7 +62,7 @@ class Trainer():
                 scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
                     (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
                         self.opt['scale_factor_start']
-                scale_factor = 1
+                #scale_factor = 1
                 #print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
                     mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
