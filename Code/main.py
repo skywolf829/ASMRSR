@@ -30,6 +30,9 @@ if __name__ == '__main__':
     parser.add_argument('--stride',default=None, type=int,help='Conv stride length')
     
     
+    parser.add_argument('--scale_factor_start',default=None, type=float,help='Where to start in-dist training')
+    parser.add_argument('--scale_factor_end',default=None, type=float,help='Where to stop in-dist training') 
+
     parser.add_argument('--x_resolution',default=None, type=int,help='x')    
     parser.add_argument('--y_resolution',default=None, type=int,help='y')
     parser.add_argument('--z_resolution',default=None, type=int,help='z')
