@@ -251,7 +251,7 @@ class RRDN(nn.Module):
         self.blocks = nn.ModuleList()
         for i in range(opt['num_blocks']):
             self.blocks.append(RRDB(opt))
-
+        self.blocks = nn.Sequential(*self.blocks)
         self.final_conv = conv_layer(opt['base_num_kernels'], opt['base_num_kernels'],
             stride=opt['stride'],padding=opt['padding'],kernel_size=opt['kernel_size'])
         self.lrelu = nn.LeakyReLU(0.2, inplace=True)
