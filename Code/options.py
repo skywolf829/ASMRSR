@@ -54,7 +54,7 @@ class Options():
         opt["upsample_mode"]           = "trilinear"
 
         opt['scale_factor_start']      = 1.1
-        opt['scale_factor_end']        = 8.0
+        opt['scale_factor_end']        = 4.0
 
         opt["train_distributed"]       = False
         opt["device"]                  = "cuda:0"
