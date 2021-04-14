@@ -289,7 +289,7 @@ class LIIF_Generator(nn.Module):
         self.opt = opt
         n_dims = 2
 
-        self.feature_extractor = RRDN(opt)     
+        self.feature_extractor = RDN(opt)     
         self.LIIF = nn.ModuleList([
             nn.Linear(opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims, 256),
             nn.ReLU(),
@@ -305,7 +305,8 @@ class LIIF_Generator(nn.Module):
         self.apply(weights_init)
 
     def forward(self, lr, locations, cell_sizes):
-        features = self.feature_extractor(lr)
+        lr_mean = lr.mean()
+        features = self.feature_extractor(lr-lr_mean)
         #print("Features shape : " + str(features.shape))
 
         n_dims = len(features.shape[2:])
@@ -419,4 +420,4 @@ class LIIF_Generator(nn.Module):
         for pred, area in zip(preds, areas):  
             ret = ret + pred * (area / tot_area).unsqueeze(-1)
         #print("Ret " + str(ret.shape))
-        return ret
+        return ret+lr_mean
