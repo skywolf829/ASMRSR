@@ -98,7 +98,7 @@ class Trainer():
                 if(rank == 0):
                     print("Scale factor: %0.02f, L1: %0.04f, PSNR (dB): %0.02f" % (scale_factor, L1.item(), psnr.item()))
                     writer.add_scalar('L1', L1.item(), step)
-                    writer.add_images("LR, SR, HR", torch.stack([lr_im, sr_im, hr_im]), global_step=step)
+                    writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
             if(rank == 0 and epoch % self.opt['save_every'] == 0):
