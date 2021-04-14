@@ -84,7 +84,7 @@ class Options():
         opt['periodic']                = False
         opt["generator_steps"]         = 1
         opt["discriminator_steps"]     = 1
-        opt["epochs"]                  = 50
+        opt["epochs"]                  = 1000
         opt["minibatch"]               = 1        # Minibatch for training
         opt["g_lr"]                    = 0.0001    # Learning rate for GAN generator
         opt["d_lr"]                    = 0.0004    # Learning rate for GAN discriminator

@@ -70,6 +70,7 @@ class Trainer():
                 if(rank == 0):
                     lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
                         [2, 0, 1])[0:3]).unsqueeze(0)
+                    lr_im = F.interpolate(lr_im, size=hr_im.shape[2:], mode='nearest')
                 #print("LR shape : " + str(real_lr.shape))
 
                 #lr_upscaled = model(real_lr, list(real_hr.shape[2:]))
@@ -100,7 +101,7 @@ class Trainer():
                     writer.add_images("LR, SR, HR", torch.stack([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
-            if(rank == 0):
+            if(rank == 0 and epoch % self.opt['save_every'] == 0):
                 save_model(model, self.opt)
                 print("Saved model")
 
@@ -173,8 +174,9 @@ class Trainer():
                 writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
-            save_model(model, self.opt)
-            print("Saved model")
+            if(epoch % self.opt['save_every'] == 0):
+                save_model(model, self.opt)
+                print("Saved model")
 
         end_time = time.time()
         total_time = start_time - end_time
