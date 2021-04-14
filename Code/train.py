@@ -54,8 +54,8 @@ class Trainer():
                 model.zero_grad()
                 real_hr = real_hr.to(self.opt['device'])
                 if(rank == 0):
-                    writer.add_image("HR", np.transpose(to_img(real_hr, self.opt['mode']), 
-                        [2, 0, 1])[0:3], step)
+                    hr_im = torch.from_numpy(np.transpose(to_img(real_hr, self.opt['mode']), 
+                        [2, 0, 1])[0:3]).unsqueeze(0)
                 real_shape = real_hr.shape
                 #print(real_hr.dtype)
                 #print("Full shape : " + str(real_hr.shape))
@@ -68,7 +68,8 @@ class Trainer():
                     mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
                     align_corners=True, recompute_scale_factor=False)
                 if(rank == 0):
-                    writer.add_image("LR", np.transpose(to_img(real_lr, self.opt['mode']), [2, 0, 1])[0:3], step)
+                    lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
+                        [2, 0, 1])[0:3]).unsqueeze(0)
                 #print("LR shape : " + str(real_lr.shape))
 
                 #lr_upscaled = model(real_lr, list(real_hr.shape[2:]))
@@ -84,9 +85,9 @@ class Trainer():
                 else:                    
                     lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
                 if(rank == 0):
-                    writer.add_image("Upscaled", 
-                        np.transpose(to_img(lr_upscaled, 
-                        self.opt['mode']),[2, 0, 1])[0:3], step)
+                    sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
+                        self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
+
                 L1 = L1loss(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
                 L1.backward()
                 model_optim.step()
@@ -96,6 +97,7 @@ class Trainer():
                 if(rank == 0):
                     print("Scale factor: %0.02f, L1: %0.04f, PSNR (dB): %0.02f" % (scale_factor, L1.item(), psnr.item()))
                     writer.add_scalar('L1', L1.item(), step)
+                    writer.add_images("LR, SR, HR", torch.stack([lr_im, sr_im, hr_im]), step=step)
                 step += 1
             
             if(rank == 0):
