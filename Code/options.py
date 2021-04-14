@@ -90,7 +90,7 @@ class Options():
         opt["d_lr"]                    = 0.0004    # Learning rate for GAN discriminator
         opt["beta_1"]                  = 0.5
         opt["beta_2"]                  = 0.999
-        opt["gamma"]                   = 0.1
+        opt["gamma"]                   = 0.5
 
         # Info during training (to continue if it stopped)
         opt["scale_in_training"]       = 0

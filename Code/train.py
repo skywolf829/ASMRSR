@@ -30,7 +30,7 @@ class Trainer():
         model_optim = optim.Adam(model.parameters(), lr=self.opt["g_lr"], 
             betas=(self.opt["beta_1"],self.opt["beta_2"]))
         optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
-            milestones=[0.8*self.opt['epochs']-self.opt['epoch_number']],gamma=self.opt['gamma'])
+            milestones=[200, 400, 600, 800],gamma=self.opt['gamma'])
 
         if(rank == 0):
             writer = SummaryWriter(os.path.join('tensorboard',opt['save_name']))
@@ -97,7 +97,7 @@ class Trainer():
                 if(rank == 0):
                     print("Scale factor: %0.02f, L1: %0.04f, PSNR (dB): %0.02f" % (scale_factor, L1.item(), psnr.item()))
                     writer.add_scalar('L1', L1.item(), step)
-                    writer.add_images("LR, SR, HR", torch.stack([lr_im, sr_im, hr_im]), step=step)
+                    writer.add_images("LR, SR, HR", torch.stack([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
             if(rank == 0):
@@ -115,7 +115,7 @@ class Trainer():
         model_optim = optim.Adam(model.parameters(), lr=self.opt["g_lr"], 
             betas=(self.opt["beta_1"],self.opt["beta_2"]))
         optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
-            milestones=[0.8*self.opt['epochs']-self.opt['epoch_number']],gamma=self.opt['gamma'])
+            milestones=[200, 400, 600, 800],gamma=self.opt['gamma'])
 
         writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
 
@@ -134,26 +134,23 @@ class Trainer():
             for batch_num, real_hr in enumerate(dataloader):
                 model.zero_grad()
                 real_hr = real_hr.to(self.opt['device'])
-                writer.add_image("HR", np.transpose(to_img(real_hr, self.opt['mode']), 
-                    [2, 0, 1])[0:3], step)
+                hr_im = torch.from_numpy(np.transpose(to_img(real_hr, self.opt['mode']), 
+                        [2, 0, 1])[0:3]).unsqueeze(0)
                 real_shape = real_hr.shape
-                #print(real_hr.dtype)
-                #print("Full shape : " + str(real_hr.shape))
                 scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
                     (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
                         self.opt['scale_factor_start']
-                scale_factor = 1
-                #print("Scale factor: " + str(scale_factor))
+
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
                     mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
                     align_corners=True, recompute_scale_factor=False)
-                writer.add_image("LR", np.transpose(to_img(real_lr, self.opt['mode']), [2, 0, 1])[0:3], step)
-                #print("LR shape : " + str(real_lr.shape))
+                lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
+                        [2, 0, 1])[0:3]).unsqueeze(0)
+                lr_im = F.interpolate(lr_im, mode='nearest', size=hr_im.shape[2:])
 
-                #lr_upscaled = model(real_lr, list(real_hr.shape[2:]))
                 hr_coords, real_hr = to_pixel_samples(real_hr, flatten=False)
                 cell_sizes = torch.ones_like(hr_coords)
-                #print("Cell sizes : " + str(cell_sizes.shape))
+
                 for i in range(cell_sizes.shape[-1]):
                     cell_sizes[:,i] *= 2 / real_shape[2+i]
                 
@@ -162,18 +159,18 @@ class Trainer():
                     lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                 else:                    
                     lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
-                writer.add_image("Upscaled", 
-                    np.transpose(to_img(lr_upscaled, 
-                    self.opt['mode']),[2, 0, 1])[0:3],
-                    step)
+                sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
+                        self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
                 L1 = L1loss(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
                 L1.backward()
                 model_optim.step()
                 optim_scheduler.step()
-
                 psnr = PSNR(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
-                print("Scale factor: %0.02f, L1: %0.04f, PSNR (dB): %0.02f" % (scale_factor, L1.item(), psnr.item()))
+                
+                print("Epoch %i batch %i, sf: x%0.02f, L1: %0.04f, PSNR (dB): %0.02f" % \
+                    (epoch, batch_num, scale_factor, L1.item(), psnr.item()))
                 writer.add_scalar('L1', L1.item(), step)
+                writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
             save_model(model, self.opt)
