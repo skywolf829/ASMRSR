@@ -280,8 +280,8 @@ class RDN(nn.Module):
     def forward(self, x):
         x = self.first_conv(x)
         out = self.blocks(x)
-        out = self.final_conv(out+x)
-        return out
+        out = self.final_conv(out)
+        return out+x
 
 class LIIF_Generator(nn.Module):
     def __init__(self, opt):
