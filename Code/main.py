@@ -1,9 +1,8 @@
 from utility_functions import str2bool
 from options import *
 from datasets import LocalDataset
-from models import load_model
+from models import LIIF_Generator, load_model
 from train import Trainer
-from models import MSR_Generator
 import argparse
 import os
 
@@ -89,7 +88,7 @@ if __name__ == '__main__':
             if args[k] is not None:
                 opt[k] = args[k]
         dataset = LocalDataset(opt)
-        model = MSR_Generator(opt)
+        model = LIIF_Generator(opt)
 
     else:        
         opt = load_options(os.path.join(save_folder, args["load_from"]))

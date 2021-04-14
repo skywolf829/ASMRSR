@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init
+from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
 from options import save_options, load_options, Options
 import numpy as np
@@ -219,102 +219,204 @@ class SinGAN_Discriminator(nn.Module):
     def forward(self, x):
         return self.model(x)
 
-class MSR_Generator(nn.Module):
-    def __init__(self, opt):
-        super(MSR_Generator, self).__init__()
-        self.opt = opt
-
-        fc_in = 3
+class RDB(nn.Module):
+    def __init__ (self,in_c,out_c,opt):
+        super(RDB, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
         elif(opt['mode'] == "3D"):
             conv_layer = nn.Conv3d
-            fc_in = 4
 
-        self.c1 = conv_layer(opt['num_channels'], opt['base_num_kernels'],
-        stride=opt['stride'],padding=opt['padding'],kernel_size=opt['kernel_size'])
-        self.blocks = []
+        self.block = nn.Sequential(
+            conv_layer(in_c, out_c, kernel_size=opt['kernel_size'], padding=1),
+            nn.ReLU(),
+            conv_layer(out_c, out_c, kernel_size=opt['kernel_size'], padding=1)
+        )
+
+    def forward(self, x):
+        out = self.block(x)
+        return out + x
+
+class RRDN(nn.Module):
+    def __init__ (self,opt):
+        super(RRDN, self).__init__()
+        if(opt['mode'] == "2D"):
+            conv_layer = nn.Conv2d
+        elif(opt['mode'] == "3D"):
+            conv_layer = nn.Conv3d
+
+        self.first_conv = conv_layer(opt['num_channels'], opt['base_num_kernels'],
+            stride=opt['stride'],padding=opt['padding'],kernel_size=opt['kernel_size'])
+
+        self.blocks = nn.ModuleList()
         for i in range(opt['num_blocks']):
             self.blocks.append(RRDB(opt))
-        self.blocks =  nn.ModuleList(self.blocks)
-        self.c2 = conv_layer(opt['base_num_kernels'], opt['base_num_kernels'],
+
+        self.final_conv = conv_layer(opt['base_num_kernels'], opt['base_num_kernels'],
             stride=opt['stride'],padding=opt['padding'],kernel_size=opt['kernel_size'])
         self.lrelu = nn.LeakyReLU(0.2, inplace=True)
 
-        self.fc1 = nn.Linear(fc_in, 256)
-        self.fc2 = nn.Linear(256, opt['base_num_kernels'] * opt['num_channels'] * opt['kernel_size'] * opt['kernel_size'])
+    def forward(self, x):
+        x = self.first_conv(x)
+        out = self.blocks(x)
+        out = self.final_conv(out)
+        return out + x
+
+class RDN(nn.Module):
+    def __init__ (self,opt):
+        super(RDN, self).__init__()
+        if(opt['mode'] == "2D"):
+            conv_layer = nn.Conv2d
+        elif(opt['mode'] == "3D"):
+            conv_layer = nn.Conv3d
+
+        self.first_conv = conv_layer(opt['num_channels'], opt['base_num_kernels'], kernel_size=opt['kernel_size'], padding=1)
+        self.blocks = nn.ModuleList()
+        for i in range(opt['num_blocks']):
+            self.blocks.append(RDB(opt['base_num_kernels'], opt['base_num_kernels'], opt))
+        self.blocks = nn.Sequential(*self.blocks)
+        self.final_conv = conv_layer(opt['base_num_kernels'], opt['base_num_kernels'], kernel_size=opt['kernel_size'], padding=1)
+
+    def forward(self, x):
+        x = self.first_conv(x)
+        out = self.blocks(x)
+        out = self.final_conv(out)
+        return out + x
+
+class LIIF_Generator(nn.Module):
+    def __init__(self, opt):
+        super(LIIF_Generator, self).__init__()
+        self.opt = opt
+        n_dims = 2
+
+        self.feature_extractor = RDN(opt)     
+        self.LIIF = nn.ModuleList([
+            nn.Linear(opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, 256),
+            nn.ReLU(),
+            nn.Linear(256, opt["num_channels"])
+        ])
+        self.LIIF = nn.Sequential(*self.LIIF)
         self.apply(weights_init)
 
-    def forward(self, x, scale_factor):
-        print("Input shape " + str(x.shape))
-        n_chans = x.shape[1]
-        x = self.c1(x)
-        features = x.clone()
-        for i, mod in enumerate(self.blocks):
-            features = mod(features)
-            
-        features = self.c2(features)
-        features = x + features
-        print("Features shape : " + str(features.shape))
+    def forward(self, lr, locations, cell_sizes):
+        features = self.feature_extractor(lr)
+        #print("Features shape : " + str(features.shape))
 
-        out_shape = list(x.shape)
-        out_shape[1] = n_chans
-        for i in range(2, len(out_shape)):
-            out_shape[i] = ceil(out_shape[i]*scale_factor)
-        out = torch.zeros(out_shape, device=x.device, dtype=x.dtype)
-        print("Out shape: " + str(out.shape))
-
-        sf_inds = torch.from_numpy(np.array(scale_factor))
-        sf_inds.type = x.dtype
-        sf_inds = sf_inds.to(x.device).view(1, 1)  
-        x_inds = torch.arange(0, out_shape[2], dtype=x.dtype, device=x.device).view(out_shape[2], 1)  
-        y_inds = torch.arange(0, out_shape[3], dtype=x.dtype, device=x.device).view(out_shape[3], 1)  
+        n_dims = len(features.shape[2:])
         if(self.opt['mode'] == "2D"):
-            x_inds = x_inds.repeat(out_shape[3], 1)
-            y_inds = y_inds.repeat(out_shape[2], 1)
-            sf_inds = sf_inds.repeat(out_shape[2] * out_shape[3], 1)
-            weights_input = torch.cat([x_inds, y_inds, sf_inds], dim=1)
-        if(self.opt['mode'] == "3D"):
-            z_inds = torch.arange(0, out_shape[4], dtype=x.dtype, device=x.device)
-            x_inds = x_inds.repeat(out_shape[3]*out_shape[4], 1)
-            y_inds = y_inds.repeat(out_shape[2]*out_shape[4], 1)
-            z_inds = z_inds.repeat(out_shape[2]*out_shape[3], 1)
-            sf_inds = sf_inds.repeat(out_shape[2] * out_shape[3] * out_shape[4], 1)
-            weights_input = torch.cat([x_inds, y_inds, z_inds, sf_inds], dim=1)
+            features = F.pad(features, [1, 1, 1, 1], mode='reflect')
+            #print("Padded features " + str(features.shape))
+            features = F.unfold(features, 3, padding=0).view(
+                features.shape[0], features.shape[1] * (3**n_dims), features.shape[2]-2, features.shape[3]-2)
+        else:
+            features = F.pad(features, [1, 1, 1, 1, 1, 1], mode='reflect')
+            features = F.unfold(features, 3, padding=0).view(
+                features.shape[0], features.shape[1] * (3**n_dims), features.shape[2]-2, 
+                features.shape[3]-2, features.shape[4]-2)
 
-        weights = self.fc1(weights_input)
-        weights = self.lrelu(weights)
-        weights = self.fc2(weights)
+        vx_lst = [-1, 1]
+        vy_lst = [-1, 1]
+        eps_shift = 1e-6
+        rx = 2 / features.shape[2] / 2
+        ry = 2 / features.shape[3] / 2
+        if(self.opt['mode']== "3D"):
+            rz = 2 / features.shape[4] / 2
+            vz_lst = [-1, 1]
+        #print("Features unfolded : " + str(features.shape))
+        feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
+            flatten=False)
+        #print("Feat coord before stuff" + str(feat_coord.shape))
         if(self.opt['mode'] == "2D"):
-            weights = torch.reshape(weights, [out_shape[0], out_shape[1], out_shape[2], out_shape[3], self.opt['base_num_kernels'], 
-                self.opt['kernel_size'], self.opt['kernel_size']])
-        elif(self.opt['mode'] == "3D"):
-            weights = torch.reshape(weights, [out_shape[0], out_shape[1], out_shape[2], out_shape[3], out_shape[4],
-                self.opt['base_num_kernels'], self.opt['kernel_size'], self.opt['kernel_size']])
-        print("Weights shape: " + str(weights.shape))
-        half_k_size = int(self.opt['kernel_size']/2)
-        for i in range(out.shape[2]):
-            i_prime = int(i/scale_factor)
-            i_s = min(max(0, i_prime-half_k_size), features.shape[2] - self.opt['kernel_size'])
-            i_e = min(i_s+self.opt['kernel_size'], out.shape[2])
-            for j in range(out.shape[3]):
-                j_prime = int(j/scale_factor)
-                j_s = min(max(0, j_prime-half_k_size), features.shape[3]-self.opt['kernel_size'])
-                j_e = min(j_s+self.opt['kernel_size'], out.shape[3])
-                if(self.opt['mode'] == "2D"):                    
-                    for c in range(out_shape[1]):
-                        out[:,c,i,j] = (weights[:,c,i,j,:,:,:] * \
-                            features[:,:,i_s:i_e,j_s:j_e]).sum()
-                elif(self.opt['mode'] == "3D"):
-                    for k in range(out.shape[4]):                        
-                        k_prime = int(k/scale_factor)
-                        k_s = min(max(0, k_prime-half_k_size), features.shape[4]-self.opt['kernel_size'])
-                        k_e = min(k_s+self.opt['kernel_size'], out.shape[4])
-                        for c in range(n_chans):
-                            out[:,c,i,j,k] = (weights[:,c,i,j,k,:,:,:] * \
-                                features[:,:,i_s:i_e,j_s:j_e,k_s:k_e]).sum()
+            feat_coord = feat_coord.permute(2, 0, 1).\
+                unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
+        else:
+            feat_coord = feat_coord.permute(3, 0, 1, 2).\
+                unsqueeze(0).expand(features.shape[0], 3, *features.shape[2:])
+        #print("Feat coord " + str(feat_coord.shape))
+        preds = []
+        areas = []
+        for vx in vx_lst:
+            for vy in vy_lst:
+                if(self.opt['mode'] == "2D"):
+                    loc_ = locations.clone()
+                    #print("Loc: " + str(loc_.shape))
+                    loc_[:, :, 0] += vx * rx + eps_shift
+                    loc_[:, :, 1] += vy * ry + eps_shift
+                    loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
+                    q_feat = F.grid_sample(
+                        features, loc_.flip(-1).unsqueeze(0),
+                        mode='nearest', align_corners=False)
+                    #print("Q feat: " + str(q_feat.shape))
+                    q_coord = F.grid_sample(
+                        feat_coord, loc_.flip(-1).unsqueeze(0),
+                        mode='nearest', align_corners=False)
+                    #print("Q coord: " + str(q_coord.shape))
+                    rel_coord = locations - q_coord[0].permute(1, 2, 0)
+                    rel_coord[:, :, 0] *= features.shape[2]
+                    rel_coord[:, :, 1] *= features.shape[3]
+                    
+                    #print("Rel coords: " + str(rel_coord.shape))
+                    fc_input = torch.cat([q_feat[0].permute(1, 2, 0).contiguous(), rel_coord], dim=-1)
+                    #print("fc_input : " + str(fc_input.shape))
 
-        return out
+                    rel_cell = cell_sizes.clone()
+                    rel_cell[:, :, 0] *= features.shape[2]
+                    rel_cell[:, :, 1] *= features.shape[3]
+                    #print("Rel_cell: " + str(rel_cell.shape))
+                    fc_input = torch.cat([fc_input, rel_cell], dim=-1)
 
+                    #print("fc_input : " + str(fc_input.shape))
+                    pred = self.LIIF(fc_input)                    
+                    preds.append(pred)
+                    
+                    area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])#.flatten()
+                    areas.append(area + 1e-9)
+                else:
+                    for vz in vz_lst:
+                        loc_ = locations.clone()
+                        loc_[:, :, :, 0] += vx * rx + eps_shift
+                        loc_[:, :, :, 1] += vy * ry + eps_shift
+                        loc_[:, :, :, 2] += vz * rz + eps_shift
+                        loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
+                        q_feat = F.grid_sample(
+                            features, loc_.flip(-1).unsqueeze(1),
+                            mode='nearest', align_corners=False)[:, :, 0, :] \
+                            .permute(0, 2, 1)
+                        q_coord = F.grid_sample(
+                            feat_coord, loc_.flip(-1).unsqueeze(1),
+                            mode='nearest', align_corners=False)[:, :, 0, :] \
+                            .permute(0, 2, 1)
+                        rel_coord = locations - q_coord
+                        rel_coord[:, :, 0] *= features.shape[-2]
+                        rel_coord[:, :, 1] *= features.shape[-1]
+                        inp = torch.cat([q_feat, rel_coord], dim=-1)
 
-            
+                        if self.cell_decode:
+                            rel_cell = cell_sizes.clone()
+                            rel_cell[:, :, 0] *= features.shape[-2]
+                            rel_cell[:, :, 1] *= features.shape[-1]
+                            inp = torch.cat([inp, rel_cell], dim=-1)
+
+                        bs, q = locations.shape[:2]
+                        pred = self.imnet(inp.view(bs * q, -1)).view(bs, q, -1)
+                        preds.append(pred)
+
+                        area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])
+                        areas.append(area + 1e-9)
+
+        tot_area = torch.stack(areas).sum(dim=0)
+
+        t = areas[0]; areas[0] = areas[3]; areas[3] = t
+        t = areas[1]; areas[1] = areas[2]; areas[2] = t
+        ret = 0
+        
+        for pred, area in zip(preds, areas):  
+            ret = ret + pred * (area / tot_area).unsqueeze(-1)
+        #print("Ret " + str(ret.shape))
+        return ret

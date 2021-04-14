@@ -26,6 +26,30 @@ def load_obj(location):
 def l2normalize(v, eps=1e-12):
     return v / (v.norm() + eps)
 
+def make_coord(shape, device, flatten=True):
+    """ 
+    Make coordinates at grid centers.
+    """
+    coord_seqs = []
+    for i, n in enumerate(shape):
+        left = -1.0
+        right = 1.0
+        r = (right - left) / (2 * n)
+        seq = left + (2 * r) * torch.arange(n, device=device).float()
+        coord_seqs.append(seq)
+    ret = torch.stack(torch.meshgrid(*coord_seqs), dim=-1)
+    if(flatten):
+        ret = ret.view(-1, ret.shape[-1])
+    return ret
+
+def to_pixel_samples(vol, flatten=True):
+    """ Convert the image/volume to coord-val pairs.
+        vol: Tensor, (B, C, H, W) or (B, C, H, W, L)
+    """
+    coord = make_coord(vol.shape[2:], vol.device, flatten)
+    vals = vol.view(vol.shape[1], -1).permute(1, 0)
+    return coord, vals
+
 class SpectralNorm(nn.Module):
     def __init__(self, module, name='weight', power_iterations=1):
         super(SpectralNorm, self).__init__()
@@ -84,13 +108,12 @@ class SpectralNorm(nn.Module):
 
 def weights_init(m):
     classname = m.__class__.__name__
-    if classname.find('Conv2d') != -1:
-        m.weight.data.normal_(0.0, 0.02)
-    if classname.find('Conv3d') != -1:
-        m.weight.data.normal_(0.0, 0.02)
+    if classname.find('Conv') != -1 or isinstance(m, nn.Linear):
+        nn.init.xavier_normal_(m.weight)
+        m.bias.data.fill_(0.01)
     elif classname.find('Norm') != -1:
         m.weight.data.normal_(1.0, 0.02)
-        m.bias.data.fill_(0)
+        m.bias.data.fill_(0.01)
 
 def VoxelShuffle(t):
     input_view = t.contiguous().view(
@@ -123,7 +146,7 @@ def MSE(x, GT):
 def PSNR(x, GT, max_diff = None):
     if(max_diff is None):
         max_diff = GT.max() - GT.min()
-    p = 20 * np.log10(max_diff) - 10*np.log10(MSE(x, GT))
+    p = 20 * torch.log10(max_diff) - 10*torch.log10(MSE(x, GT))
     return p
 
 def relative_error(x, GT, max_diff = None):
@@ -242,7 +265,7 @@ def ssim3D(img1, img2, window_size = 11, size_average = True):
 
 def to_img(input : torch.Tensor, mode : str, colormap = True):
     if(mode == "2D"):
-        img = input[0].clone()
+        img = input[0].clone().detach()
         img -= img.min()
         img *= (1/img.max()+1e-6)
         if(colormap and img.shape[0] == 1):
@@ -263,7 +286,7 @@ def to_img(input : torch.Tensor, mode : str, colormap = True):
         else:
             img *= 255
             img = img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
-    print(img.shape)
+    #print(img.shape)
     return img
 
 def bilinear_interpolate(im, x, y):
