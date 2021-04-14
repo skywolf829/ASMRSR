@@ -38,8 +38,12 @@ def load_model(opt, device):
     if os.path.exists(os.path.join(folder_to_load_from, "model.ckpt")):
         model_params = torch.load(os.path.join(folder_to_load_from, "model.ckpt"),
             map_location=device)
-
-        model = MSR_Generator(opt)
+        keys = list(model_params.keys())
+        for k in keys:
+            if "module." in k:
+                model_params[k[7:]] = model_params[k]
+                del model_params[k]
+        model = LIIF_Generator(opt)
         model.load_state_dict(model_params)
 
         print("Successfully loaded model")

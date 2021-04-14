@@ -102,14 +102,14 @@ class LocalDataset(torch.utils.data.Dataset):
             if(self.opt['mode'] == "3D"):
                 z_start = 0
                 z_end = self.opt['z_resolution']
-                if((z_end-z_start) / self.subsample_dist > self.opt['cropping_resolution']):
+                if((z_end-z_start) / self.subsample_dist > self.opt['cropping_resolution'] and self.opt['cropping_resolution'] != -1):
                     z_start = torch.randint(self.opt['z_resolution'] - self.opt['cropping_resolution']*self.subsample_dist, [1]).item()
                     z_end = z_start + self.opt['cropping_resolution']*self.subsample_dist
 
-            if((y_end-y_start) / self.subsample_dist > self.opt['cropping_resolution']):
+            if((y_end-y_start) / self.subsample_dist > self.opt['cropping_resolution'] and self.opt['cropping_resolution'] != -1):
                 y_start = torch.randint(self.opt['y_resolution'] - self.opt['cropping_resolution']*self.subsample_dist, [1]).item()
                 y_end = y_start + self.opt['cropping_resolution']*self.subsample_dist
-            if((x_end-x_start) / self.subsample_dist > self.opt['cropping_resolution']):
+            if((x_end-x_start) / self.subsample_dist > self.opt['cropping_resolution'] and self.opt['cropping_resolution'] != -1):
                 x_start = torch.randint(self.opt['x_resolution'] - self.opt['cropping_resolution']*self.subsample_dist, [1]).item()
                 x_end = x_start + self.opt['cropping_resolution']*self.subsample_dist
             
