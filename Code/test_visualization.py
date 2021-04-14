@@ -1,4 +1,4 @@
-from utility_functions import str2bool, to_pixel_samples, PSNR, ssim, ssim3D
+from utility_functions import make_coord, str2bool, to_img
 from options import *
 from datasets import LocalDataset
 from models import load_model, LIIF_Generator
@@ -9,6 +9,8 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import random
+import imageio
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train on an input that is 2D')
 
@@ -39,47 +41,47 @@ if __name__ == '__main__':
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
 
-    if(args['increasing_size_test']):
-        rand_dataset_item = random.randint(0, len(dataset)-1)
-        hr = dataset[rand_dataset_item].unsqueeze(0).to(args['device'])
-        lr = F.interpolate(hr, scale_factor = 20, 
-            mode='bilinear' if args['mode'] == "2D" else "trilinear",
-            align_corners=True)
-
-
-    scale_factor_to_test = np.arange(2, 30)
-    psnrs = []
-    ssims = []
     with torch.no_grad():
-        for i in range(len(scale_factor_to_test)):
-            scale_factor = scale_factor_to_test[i]
-            psnrs_this_scale = []
-            ssims_this_scale = []
-            for j in range(len(dataset)):
-                real_hr = dataset[j].to(args['device']).unsqueeze(0)
-                real_shape = real_hr.shape
+        if(args['increasing_size_test']):
+            img_sequence = []
+            rand_dataset_item = random.randint(0, len(dataset)-1)
+            hr = dataset[rand_dataset_item].unsqueeze(0).to(args['device'])
+            hr_im = torch.from_numpy(np.transpose(to_img(hr, args['mode']), 
+                            [2, 0, 1])[0:3]).unsqueeze(0)
 
-                real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
-                    mode = "bilinear" if args['mode'] == "2D" else "trilinear",
-                    align_corners=True, recompute_scale_factor=False)
+            lr = F.interpolate(hr, scale_factor = (1/20), 
+                mode='bilinear' if args['mode'] == "2D" else "trilinear",
+                align_corners=True)
+            lr_im = torch.from_numpy(np.transpose(to_img(lr, args['mode']), 
+                [2, 0, 1])[0:3]).unsqueeze(0)
+            lr_im = F.interpolate(lr_im, size=hr_im.shape[2:], mode='nearest')
+
+            for i in range(15):
+                img_sequence.append(lr_im[0].permute(1, 2, 0).detach().cpu().numpy())
             
-                hr_coords, real_hr = to_pixel_samples(real_hr, flatten=False)
-                cell_sizes = torch.ones_like(hr_coords)
+            sizes = []
+            for i in range(2, len(hr.shape)):
+                s = [lr.shape[i], hr.shape[i]]
+                sizes.append(np.arange(s[0], s[1]-200, (s[1]-s[0])/100))
+
+            for i in range(len(sizes[0])):
+                size = []
+                for j in range(len(sizes)):
+                    size.append(sizes[j][i])
+                print(size)
+                coords = make_coord(size, args['device'], flatten=False)
+                cell_sizes = torch.ones_like(coords)
 
                 for i in range(cell_sizes.shape[-1]):
-                    cell_sizes[:,i] *= 2 / real_shape[2+i]
+                    cell_sizes[:,i] *= 2 / size[i]
                 
-                lr_upscaled = model(real_lr, hr_coords, cell_sizes)
+                lr_upscaled = model(lr, coords, cell_sizes)
                 if(args['mode'] == "2D"):
                     lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                 else:                    
                     lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
-                
-
-                p = PSNR(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
-                #if(args['mode'] == "2D"):
-                #    s = ssim()
-                psnrs_this_scale.append(p.item())
-            psnrs.append(np.array(psnrs_this_scale).mean())
-            print("Scale factor x%i, PSNR (dB): %0.02f" % (scale_factor, psnrs[-1]))
-            
+                sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, args['mode']), 
+                    [2, 0, 1])[0:3]).unsqueeze(0)
+                sr_im = F.interpolate(sr_im, size=hr_im.shape[2:], mode='nearest')
+                img_sequence.append(sr_im[0].permute(1, 2, 0).detach().cpu().numpy())
+            imageio.mimwrite(os.path.join(output_folder, "IncreasingSizeTest.gif"), img_sequence)
