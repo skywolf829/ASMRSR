@@ -24,6 +24,7 @@ class Trainer():
             world_size = self.opt['num_nodes'] * self.opt['gpus_per_node'],                              
             rank=rank                                               
         )
+        model = model.to(rank)
         model = DDP(model, device_ids=[rank]) 
 
         model_optim = optim.Adam(model.parameters(), lr=self.opt["g_lr"], 
@@ -46,30 +47,59 @@ class Trainer():
             sampler=train_sampler
         )
         L1loss = nn.L1Loss().to(opt["device"])
-
+        step = 0
         for epoch in range(opt['epoch_number'], opt['epochs']):
             opt["epoch_number"] = epoch
             for batch_num, real_hr in enumerate(dataloader):
                 model.zero_grad()
-                real_hr = real_hr.to(opt['device'])
-                scale_factor = torch.rand([1]) * \
+                real_hr = real_hr.to(self.opt['device'])
+                if(rank == 0):
+                    writer.add_image("HR", np.transpose(to_img(real_hr, self.opt['mode']), 
+                        [2, 0, 1])[0:3], step)
+                real_shape = real_hr.shape
+                #print(real_hr.dtype)
+                #print("Full shape : " + str(real_hr.shape))
+                scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
                     (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
-                        opt['scale_factor_start']
+                        self.opt['scale_factor_start']
+                scale_factor = 1
+                #print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
-                    mode = "bilinear" if opt['mode'] == "2D" else "trilinear")
+                    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+                    align_corners=True, recompute_scale_factor=False)
+                if(rank == 0):
+                    writer.add_image("LR", np.transpose(to_img(real_lr, self.opt['mode']), [2, 0, 1])[0:3], step)
+                #print("LR shape : " + str(real_lr.shape))
 
-                lr_upscaled = model(real_lr, scale_factor)
-
-                L1 = L1loss(lr_upscaled, real_hr)
+                #lr_upscaled = model(real_lr, list(real_hr.shape[2:]))
+                hr_coords, real_hr = to_pixel_samples(real_hr, flatten=False)
+                cell_sizes = torch.ones_like(hr_coords)
+                #print("Cell sizes : " + str(cell_sizes.shape))
+                for i in range(cell_sizes.shape[-1]):
+                    cell_sizes[:,i] *= 2 / real_shape[2+i]
+                
+                lr_upscaled = model(real_lr, hr_coords, cell_sizes)
+                if(self.opt['mode'] == "2D"):
+                    lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
+                else:                    
+                    lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                if(rank == 0):
+                    writer.add_image("Upscaled", 
+                        np.transpose(to_img(lr_upscaled, 
+                        self.opt['mode']),[2, 0, 1])[0:3], step)
+                L1 = L1loss(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
                 L1.backward()
                 model_optim.step()
                 optim_scheduler.step()
 
-                if(batch_num % 5 == 0 and rank == 0):
-                    print("L1: " + L1.item())
-                    writer.add_scalar('L1', L1.item())
+                psnr = PSNR(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
+                if(rank == 0):
+                    print("Scale factor: %0.02f, L1: %0.04f, PSNR (dB): %0.02f" % (scale_factor, L1.item(), psnr.item()))
+                    writer.add_scalar('L1', L1.item(), step)
+                step += 1
+            
             if(rank == 0):
-                save_model(model, opt)
+                save_model(model, self.opt)
                 print("Saved model")
 
         end_time = time.time()
