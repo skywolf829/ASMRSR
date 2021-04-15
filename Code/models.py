@@ -309,8 +309,8 @@ class LIIF_Generator(nn.Module):
         self.apply(weights_init)
 
     def forward(self, lr, locations, cell_sizes):
-        lr_mean = lr.mean()
-        features = self.feature_extractor(lr-lr_mean)
+        #lr_mean = lr.mean()
+        features = self.feature_extractor(lr)
         #print("Features shape : " + str(features.shape))
 
         n_dims = len(features.shape[2:])
@@ -328,8 +328,8 @@ class LIIF_Generator(nn.Module):
         vx_lst = [-1, 1]
         vy_lst = [-1, 1]
         eps_shift = 1e-6
-        rx = 2 / features.shape[2] / 2
-        ry = 2 / features.shape[3] / 2
+        rx = (2 / features.shape[2]) / 2
+        ry = (2 / features.shape[3]) / 2
         if(self.opt['mode']== "3D"):
             rz = 2 / features.shape[4] / 2
             vz_lst = [-1, 1]
@@ -346,6 +346,7 @@ class LIIF_Generator(nn.Module):
         #print("Feat coord " + str(feat_coord.shape))
         preds = []
         areas = []
+        
         for vx in vx_lst:
             for vy in vy_lst:
                 if(self.opt['mode'] == "2D"):
@@ -356,18 +357,18 @@ class LIIF_Generator(nn.Module):
                     loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
                     q_feat = F.grid_sample(
                         features, loc_.flip(-1).unsqueeze(0),
-                        mode='nearest', align_corners=False)
+                        mode='nearest', align_corners=False)[0]
                     #print("Q feat: " + str(q_feat.shape))
                     q_coord = F.grid_sample(
                         feat_coord, loc_.flip(-1).unsqueeze(0),
-                        mode='nearest', align_corners=False)
+                        mode='nearest', align_corners=False)[0]
                     #print("Q coord: " + str(q_coord.shape))
-                    rel_coord = locations - q_coord[0].permute(1, 2, 0)
+                    rel_coord = locations - q_coord.permute(1, 2, 0)
                     rel_coord[:, :, 0] *= features.shape[2]
                     rel_coord[:, :, 1] *= features.shape[3]
-                    
+                    #print(rel_coord)
                     #print("Rel coords: " + str(rel_coord.shape))
-                    fc_input = torch.cat([q_feat[0].permute(1, 2, 0).contiguous(), rel_coord], dim=-1)
+                    fc_input = torch.cat([q_feat.permute(1, 2, 0).contiguous(), rel_coord], dim=-1)
                     #print("fc_input : " + str(fc_input.shape))
 
                     rel_cell = cell_sizes.clone()
@@ -424,4 +425,4 @@ class LIIF_Generator(nn.Module):
         for pred, area in zip(preds, areas):  
             ret = ret + pred * (area / tot_area).unsqueeze(-1)
         #print("Ret " + str(ret.shape))
-        return ret+lr_mean
+        return ret#+lr_mean

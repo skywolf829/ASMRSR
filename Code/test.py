@@ -37,7 +37,7 @@ if __name__ == '__main__':
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
 
-    scale_factor_to_test = np.arange(2, 30)
+    scale_factor_to_test = np.arange(1, 31)
     psnrs = []
     ssims = []
     with torch.no_grad():
