@@ -95,7 +95,7 @@ class Trainer():
                 optim_scheduler.step()
 
                 psnr = PSNR(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
-                if(rank == 0):
+                if(rank == 0 and step % self.opt['save_every'] == 0):
                     print("Epoch %i batch %i, sf: x%0.02f, L1: %0.04f, PSNR (dB): %0.02f" % \
                     (epoch, batch_num, scale_factor, L1.item(), psnr.item()))                    
                     writer.add_scalar('L1', L1.item(), step)
@@ -169,10 +169,11 @@ class Trainer():
                 optim_scheduler.step()
                 psnr = PSNR(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
                 
-                print("Epoch %i batch %i, sf: x%0.02f, L1: %0.04f, PSNR (dB): %0.02f" % \
-                    (epoch, batch_num, scale_factor, L1.item(), psnr.item()))
-                writer.add_scalar('L1', L1.item(), step)
-                writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
+                if(step % self.opt['save_every'] == 0):
+                    print("Epoch %i batch %i, sf: x%0.02f, L1: %0.04f, PSNR (dB): %0.02f" % \
+                        (epoch, batch_num, scale_factor, L1.item(), psnr.item()))
+                    writer.add_scalar('L1', L1.item(), step)
+                    writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
             if(epoch % self.opt['save_every'] == 0):
