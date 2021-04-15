@@ -36,6 +36,7 @@ if __name__ == '__main__':
     for k in args.keys():
         if args[k] is not None:
             opt[k] = args[k]
+            
     opt['cropping_resolution'] = 400
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
