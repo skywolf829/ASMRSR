@@ -19,12 +19,14 @@ if __name__ == '__main__':
     parser.add_argument('--data_folder',default="isomag2D",type=str,help='Folder to test on')
     parser.add_argument('--load_from',default="isomag2D",type=str,help='Model to load and test')
     parser.add_argument('--device',default="cuda:0",type=str,help='Device to evaluate on')
-    parser.add_argument('--max_sf',default=16.0,type=float,help='Max SR factor to test')
+    parser.add_argument('--max_sf',default=8.0,type=float,help='Max SR factor to test')
 
     parser.add_argument('--increasing_size_test',default="false",type=str2bool,
         help='Gradually increase output size test')
     parser.add_argument('--single_sf_test',default="true",type=str2bool,
         help='Perform a single SF test')
+    parser.add_argument('--feature_maps_test',default="false",type=str2bool,
+        help='Save feature maps for some output')
     parser.add_argument('--increasing_sr_test',default="false",type=str2bool,
         help='Gradually increase SR factor test')
 
@@ -44,7 +46,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 64
+    opt['cropping_resolution'] = 32
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
@@ -132,6 +134,33 @@ if __name__ == '__main__':
             cv2.putText(full_im, "x%0.01f" % (hr.shape[2]/lr.shape[2]), (lr_np.shape[0], 12), 
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0, 0), 1)
             imageio.imwrite(os.path.join(output_folder, "Single_SF_test.jpg"), full_im)
+
+        if(args['feature_maps_test']):
+            rand_dataset_item = random.randint(0, len(dataset)-1)
+            hr = dataset[rand_dataset_item].unsqueeze(0).to(args['device'])
+            hr_im = torch.from_numpy(np.transpose(to_img(hr, args['mode']), 
+                            [2, 0, 1])[0:3]).unsqueeze(0)
+            size = []
+            for i in range(2, len(hr.shape)):
+                size.append(int(hr.shape[i]*(1/args['max_sf'])))
+            lr = F.interpolate(hr, size=size, 
+                    mode='bilinear' if opt['mode'] == "2D" else "trilinear",
+                    align_corners=True)
+
+            lr_im = torch.from_numpy(np.transpose(to_img(lr, args['mode']), 
+            [2, 0, 1])[0:3]).unsqueeze(0)
+            lr_im = F.interpolate(lr_im, size=hr_im.shape[2:], mode='nearest')
+
+            features = model.feature_extractor(lr)
+            for k in range(features.shape[1]):
+                f_k = torch.from_numpy(np.transpose(to_img(features[0,k].unsqueeze(0).unsqueeze(0), opt['mode']), 
+                    [2, 0, 1])[0:3]).unsqueeze(0) 
+                f_k = F.interpolate(f_k, mode="nearest", size=hr_im.shape[2:])
+                imageio.imwrite(os.path.join(output_folder, "feature_%i.jpg" % k), 
+                    f_k[0].permute(1, 2, 0).detach().cpu().numpy())
+
+            lr_np = lr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+            imageio.imwrite(os.path.join(output_folder, "feature_input.jpg"), lr_np)
 
         if(args['increasing_sr_test']):
             img_sequence = []

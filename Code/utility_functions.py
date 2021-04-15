@@ -32,10 +32,10 @@ def make_coord(shape, device, flatten=True):
     """
     coord_seqs = []
     for i, n in enumerate(shape):
+        r = 1 / (n)
         left = -1.0
         right = 1.0
-        r = 1 / (n-1)
-        seq = left + (2 * r) * torch.arange(n, device=device).float()
+        seq = left + r + (2 * r) * torch.arange(0, n, device=device).float()
         coord_seqs.append(seq)
     ret = torch.stack(torch.meshgrid(*coord_seqs), dim=-1)
     if(flatten):

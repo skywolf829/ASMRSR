@@ -347,6 +347,8 @@ class LIIF_Generator(nn.Module):
         preds = []
         areas = []
         
+        print(rx)
+        print(ry)
         for vx in vx_lst:
             for vy in vy_lst:
                 if(self.opt['mode'] == "2D"):
@@ -364,9 +366,11 @@ class LIIF_Generator(nn.Module):
                         mode='nearest', align_corners=False)[0]
                     #print("Q coord: " + str(q_coord.shape))
                     rel_coord = locations - q_coord.permute(1, 2, 0)
+                    print(loc_)
+
                     rel_coord[:, :, 0] *= features.shape[2]
                     rel_coord[:, :, 1] *= features.shape[3]
-                    #print(rel_coord)
+                    
                     #print("Rel coords: " + str(rel_coord.shape))
                     fc_input = torch.cat([q_feat.permute(1, 2, 0).contiguous(), rel_coord], dim=-1)
                     #print("fc_input : " + str(fc_input.shape))
@@ -417,12 +421,12 @@ class LIIF_Generator(nn.Module):
                         areas.append(area + 1e-9)
 
         tot_area = torch.stack(areas).sum(dim=0)
-
-        t = areas[0]; areas[0] = areas[3]; areas[3] = t
-        t = areas[1]; areas[1] = areas[2]; areas[2] = t
-        ret = 0
-        
-        for pred, area in zip(preds, areas):  
-            ret = ret + pred * (area / tot_area).unsqueeze(-1)
+        if(self.opt['mode'] == "2D"):
+            t = areas[0]; areas[0] = areas[3]; areas[3] = t
+            t = areas[1]; areas[1] = areas[2]; areas[2] = t
+            ret = 0
+            
+            for pred, area in zip(preds, areas):  
+                ret = ret + pred * (area / tot_area).unsqueeze(-1)
         #print("Ret " + str(ret.shape))
         return ret#+lr_mean
