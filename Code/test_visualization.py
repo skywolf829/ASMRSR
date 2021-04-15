@@ -62,7 +62,7 @@ if __name__ == '__main__':
             sizes = []
             for i in range(2, len(hr.shape)):
                 s = [lr.shape[i], hr.shape[i]]
-                sizes.append(np.arange(s[0], s[1]-200, (s[1]-s[0])/100))
+                sizes.append(np.arange(s[0], s[1], (s[1]-s[0])/100))
 
             for i in range(len(sizes[0])):
                 size = []
