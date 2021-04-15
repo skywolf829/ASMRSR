@@ -14,7 +14,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--mode',default="2D",help='The type of input - 2D, 3D')
     parser.add_argument('--data_folder',default="isomag2D",type=str,help='Folder to test on')
-    parser.add_argument('--load_from',default="Temp",type=str,help='Model to load and test')
+    parser.add_argument('--load_from',default="isomag2D",type=str,help='Model to load and test')
     parser.add_argument('--device',default="cuda:0",type=str,help='Device to evaluate on')
 
     args = vars(parser.parse_args())

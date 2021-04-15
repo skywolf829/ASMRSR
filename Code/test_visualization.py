@@ -19,7 +19,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_folder',default="isomag2D",type=str,help='Folder to test on')
     parser.add_argument('--load_from',default="isomag2D",type=str,help='Model to load and test')
     parser.add_argument('--device',default="cuda:0",type=str,help='Device to evaluate on')
-    parser.add_argument('--max_sf',default=8.0,type=float,help='Max SR factor to test')
+    parser.add_argument('--max_sf',default=16.0,type=float,help='Max SR factor to test')
 
     parser.add_argument('--increasing_size_test',default="false",type=str2bool,
         help='Gradually increase output size test')
@@ -46,7 +46,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 32
+    opt['cropping_resolution'] = 64
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
