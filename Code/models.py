@@ -432,4 +432,4 @@ class LIIF_Generator(nn.Module):
             for pred, area in zip(preds, areas):  
                 ret = ret + pred * (area / tot_area).unsqueeze(-1)
         #print("Ret " + str(ret.shape))
-        return ret+lr_interp.detach()
+        return ret#+lr_interp.detach()

@@ -11,6 +11,7 @@ import torch.nn.functional as F
 import random
 import imageio
 import cv2
+import matplotlib.pyplot as plt
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train on an input that is 2D')
@@ -23,8 +24,10 @@ if __name__ == '__main__':
 
     parser.add_argument('--increasing_size_test',default="false",type=str2bool,
         help='Gradually increase output size test')
-    parser.add_argument('--single_sf_test',default="true",type=str2bool,
+    parser.add_argument('--single_sf_test',default="false",type=str2bool,
         help='Perform a single SF test')
+    parser.add_argument('--histogram_test',default="true",type=str2bool,
+        help='Perform histogram test on inputs/outputs/target')
     parser.add_argument('--feature_maps_test',default="false",type=str2bool,
         help='Save feature maps for some output')
     parser.add_argument('--increasing_sr_test',default="false",type=str2bool,
@@ -32,6 +35,8 @@ if __name__ == '__main__':
 
     args = vars(parser.parse_args())
 
+    torch.manual_seed(0b10101010101010101010101010101010)
+    random.seed(0b10101010101010101010101010101010)
     file_folder_path = os.path.dirname(os.path.abspath(__file__))
     project_folder_path = os.path.join(file_folder_path, "..")
 
@@ -46,7 +51,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 4
+    opt['cropping_resolution'] = 750
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
@@ -143,6 +148,62 @@ if __name__ == '__main__':
             imageio.imwrite(os.path.join(output_folder, "Single_SF_sr.jpg"), sr_np)
             imageio.imwrite(os.path.join(output_folder, "Single_SF_hr.jpg"), hr_np)
             
+        if(args['histogram_test']):
+            rand_dataset_item = random.randint(0, len(dataset)-1)
+            hr = dataset[rand_dataset_item].unsqueeze(0).to(args['device'])
+            hr_im = torch.from_numpy(np.transpose(to_img(hr, args['mode']), 
+                            [2, 0, 1])[0:3]).unsqueeze(0)
+            size = []
+            for i in range(2, len(hr.shape)):
+                size.append(int(hr.shape[i]*(1/args['max_sf'])))
+            lr = F.interpolate(hr, size=size, 
+                    mode='bilinear' if opt['mode'] == "2D" else "trilinear",
+                    align_corners=False, recompute_scale_factor=False)
+
+            lr_im = torch.from_numpy(np.transpose(to_img(lr, args['mode']), 
+            [2, 0, 1])[0:3]).unsqueeze(0)
+            lr_im = F.interpolate(lr_im, size=hr_im.shape[2:], mode='nearest')
+
+            coords = make_coord(hr.shape[2:], args['device'], flatten=False)
+            cell_sizes = torch.ones_like(coords)
+
+            for i in range(cell_sizes.shape[-1]):
+                cell_sizes[:,i] *= 2 / size[i]
+            
+            lr_upscaled = model(lr, coords, cell_sizes)
+            if(args['mode'] == "2D"):
+                lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
+            else:                    
+                lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+            print("PSNR: %0.02f" % PSNR(hr, lr_upscaled))
+            sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, args['mode']), 
+                [2, 0, 1])[0:3]).unsqueeze(0)
+            sr_im = F.interpolate(sr_im, size=hr_im.shape[2:], mode='nearest')
+            error_im = torch.abs(lr_upscaled-hr)
+
+            lr_np = lr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+            sr_np = sr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+            hr_np = hr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+            error_np = error_im[0].permute(1, 2, 0).detach().cpu().numpy()
+
+            full_im = np.append(lr_np, sr_np, axis=1)
+            full_im = np.append(full_im, hr_np, axis=1)
+            cv2.putText(full_im, "x%0.01f" % (hr.shape[2]/lr.shape[2]), (lr_np.shape[0], 12), 
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0, 0), 1)
+            imageio.imwrite(os.path.join(output_folder, "Single_SF_test.jpg"), full_im)
+            imageio.imwrite(os.path.join(output_folder, "Single_SF_error.jpg"), error_np)
+            imageio.imwrite(os.path.join(output_folder, "Single_SF_sr.jpg"), sr_np)
+            imageio.imwrite(os.path.join(output_folder, "Single_SF_hr.jpg"), hr_np)
+
+            #plt.hist(lr_np.flatten(), 50, color="blue", histtype='step',
+            #    density=True, fill=False, label="Low res input")
+            plt.hist(sr_np.flatten(), 50, color="green", histtype='step',
+                density=True, fill=False, label="SR output")
+            plt.hist(hr_np.flatten(), 50, color="red", histtype='step',
+                density=True, fill=False, label="High res target")
+            plt.title("Histograms of each image")
+            plt.legend(loc="upper left")
+            plt.show()
 
         if(args['feature_maps_test']):
             rand_dataset_item = random.randint(0, len(dataset)-1)

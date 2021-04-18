@@ -32,12 +32,12 @@ if __name__ == '__main__':
     for k in args.keys():
         if args[k] is not None:
             opt[k] = args[k]
-    opt['cropping_resolution'] = -1
+    opt['cropping_resolution'] = 128
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
 
-    scale_factor_to_test = np.arange(1, 31)
+    scale_factor_to_test = np.arange(1, 33)
     psnrs = []
     ssims = []
     with torch.no_grad():
