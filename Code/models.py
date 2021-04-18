@@ -310,7 +310,7 @@ class LIIF_Generator(nn.Module):
 
     def forward(self, lr, locations, cell_sizes):
         #lr_mean = lr.mean()
-        lr_interp = F.grid_sample(lr, locations.unsqueeze(0), 
+        lr_interp = F.grid_sample(lr, locations.flip(-1).unsqueeze(0), 
             mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
             align_corners=True)[0].permute(1, 2, 0)
         features = self.feature_extractor(lr)
