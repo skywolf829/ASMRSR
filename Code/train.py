@@ -78,7 +78,7 @@ class Trainer():
                 cell_sizes = torch.ones_like(hr_coords)
                 #print("Cell sizes : " + str(cell_sizes.shape))
                 for i in range(cell_sizes.shape[-1]):
-                    cell_sizes[:,i] *= 2 / real_shape[2+i]
+                    cell_sizes[:,:,i] *= 2 / real_shape[2+i]
                 
                 lr_upscaled = model(real_lr, hr_coords, cell_sizes)
                 if(self.opt['mode'] == "2D"):
@@ -154,7 +154,7 @@ class Trainer():
                 cell_sizes = torch.ones_like(hr_coords)
 
                 for i in range(cell_sizes.shape[-1]):
-                    cell_sizes[:,i] *= 2 / real_shape[2+i]
+                    cell_sizes[:,:,i] *= 2 / real_shape[2+i]
                 
                 lr_upscaled = model(real_lr, hr_coords, cell_sizes)
                 if(self.opt['mode'] == "2D"):

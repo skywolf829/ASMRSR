@@ -24,14 +24,17 @@ if __name__ == '__main__':
 
     parser.add_argument('--increasing_size_test',default="false",type=str2bool,
         help='Gradually increase output size test')
-    parser.add_argument('--single_sf_test',default="false",type=str2bool,
+    parser.add_argument('--single_sf_test',default="true",type=str2bool,
         help='Perform a single SF test')
-    parser.add_argument('--histogram_test',default="true",type=str2bool,
+    parser.add_argument('--histogram_test',default="false",type=str2bool,
         help='Perform histogram test on inputs/outputs/target')
+    parser.add_argument('--patchwise_reconstruction_test',default="false",type=str2bool,
+        help='Patchwise reconstruction for a full image')
     parser.add_argument('--feature_maps_test',default="false",type=str2bool,
         help='Save feature maps for some output')
     parser.add_argument('--increasing_sr_test',default="false",type=str2bool,
         help='Gradually increase SR factor test')
+        
 
     args = vars(parser.parse_args())
 
@@ -51,7 +54,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 750
+    opt['cropping_resolution'] = 480
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
@@ -88,7 +91,7 @@ if __name__ == '__main__':
                 cell_sizes = torch.ones_like(coords)
 
                 for i in range(cell_sizes.shape[-1]):
-                    cell_sizes[:,i] *= 2 / size[i]
+                    cell_sizes[:,:,i] *= 2 / size[i]
                 
                 lr_upscaled = model(lr, coords, cell_sizes)
                 if(args['mode'] == "2D"):
@@ -119,9 +122,9 @@ if __name__ == '__main__':
 
             coords = make_coord(hr.shape[2:], args['device'], flatten=False)
             cell_sizes = torch.ones_like(coords)
-
+            print(cell_sizes.shape)
             for i in range(cell_sizes.shape[-1]):
-                cell_sizes[:,i] *= 2 / size[i]
+                cell_sizes[:,:,i] *= 2 / size[i]
             
             lr_upscaled = model(lr, coords, cell_sizes)
             if(args['mode'] == "2D"):
@@ -168,7 +171,7 @@ if __name__ == '__main__':
             cell_sizes = torch.ones_like(coords)
 
             for i in range(cell_sizes.shape[-1]):
-                cell_sizes[:,i] *= 2 / size[i]
+                cell_sizes[:,:,i] *= 2 / size[i]
             
             lr_upscaled = model(lr, coords, cell_sizes)
             if(args['mode'] == "2D"):
@@ -204,6 +207,92 @@ if __name__ == '__main__':
             plt.title("Histograms of each image")
             plt.legend(loc="upper left")
             plt.show()
+
+        if(args['patchwise_reconstruction_test']):
+            patch_size = opt['training_patch_size']
+            print(patch_size)
+            rand_dataset_item = random.randint(0, len(dataset)-1)
+            hr = dataset[rand_dataset_item].unsqueeze(0).to(args['device'])
+            
+            hr_orig = hr.clone()
+            print(hr.shape)
+            hr = F.unfold(hr, patch_size, stride=patch_size)
+            print(hr.shape)
+            hr = hr.view(hr.shape[0], patch_size, 
+                patch_size, -1).contiguous().permute(3, 0, 1, 2)
+            print(hr.shape)
+    
+            size = []
+            for i in range(2, len(hr.shape)):
+                size.append(int(hr.shape[i]*(1/args['max_sf'])))
+            
+            coords = make_coord(hr.shape[2:], args['device'], flatten=False)
+            cell_sizes = torch.ones_like(coords)
+            for i in range(cell_sizes.shape[-1]):
+                cell_sizes[:,:,i] *= 2 / size[i]
+            #quit()
+            psnrs = []
+            output_lrs = []
+            for i in range(hr.shape[0]):
+                hr_im = torch.from_numpy(np.transpose(to_img(hr[i:i+1], args['mode']), 
+                            [2, 0, 1])[0:3]).unsqueeze(0)
+
+                lr = F.interpolate(hr[i:i+1], size=size, 
+                        mode='bilinear' if opt['mode'] == "2D" else "trilinear",
+                        align_corners=False, recompute_scale_factor=False)
+                
+                lr_im = torch.from_numpy(np.transpose(to_img(lr, args['mode']), 
+                [2, 0, 1])[0:3]).unsqueeze(0)
+                lr_im = F.interpolate(lr_im, size=hr_im.shape[2:], mode='nearest')
+
+                lr_upscaled = model(lr, coords, cell_sizes)
+                if(args['mode'] == "2D"):
+                    lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
+                else:                    
+                    lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                output_lrs.append(lr_upscaled)
+                p = PSNR(hr[i:i+1], lr_upscaled).item()
+                print("PSNR: %0.02f" % p)
+                psnrs.append(p)
+
+                sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, args['mode']), 
+                    [2, 0, 1])[0:3]).unsqueeze(0)
+                sr_im = F.interpolate(sr_im, size=hr_im.shape[2:], mode='nearest')
+                error_im = torch.abs(lr_upscaled-hr)
+
+                lr_np = lr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+                sr_np = sr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+                hr_np = hr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+                error_np = error_im[0].permute(1, 2, 0).detach().cpu().numpy()
+
+                full_im = np.append(lr_np, sr_np, axis=1)
+                full_im = np.append(full_im, hr_np, axis=1)
+                cv2.putText(full_im, "x%0.01f" % (hr.shape[2]/lr.shape[2]), (lr_np.shape[0], 12), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0, 0), 1)
+                imageio.imwrite(os.path.join(output_folder, "Single_SF_test.jpg"), full_im)
+                #imageio.imwrite(os.path.join(output_folder, "Single_SF_error.jpg"), error_np)
+                imageio.imwrite(os.path.join(output_folder, "Single_SF_sr.jpg"), sr_np)
+                imageio.imwrite(os.path.join(output_folder, "Single_SF_hr.jpg"), hr_np)
+            print("Average PSNR: %0.02f" % np.array(psnrs).mean())
+
+            output_lrs = torch.cat(output_lrs, dim=0)
+            print(output_lrs.shape)
+            output_lrs = output_lrs.permute(1, 2, 3, 0).view(1, 
+                patch_size*patch_size, -1)
+            print(output_lrs.shape)
+            output_lrs = F.fold(output_lrs, output_size=hr_orig.shape[2:], 
+                kernel_size=patch_size, stride=patch_size)
+            print(output_lrs.shape)
+            print("Final PSNR: %0.02f" % PSNR(hr_orig, output_lrs).item())
+
+            sr_im = torch.from_numpy(np.transpose(to_img(output_lrs, args['mode']), 
+                [2, 0, 1])[0:3]).unsqueeze(0)
+            hr_im = torch.from_numpy(np.transpose(to_img(hr_orig, args['mode']), 
+                [2, 0, 1])[0:3]).unsqueeze(0)
+            sr_np = sr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+            hr_np = hr_im[0].permute(1, 2, 0).detach().cpu().numpy()
+            imageio.imwrite(os.path.join(output_folder, "Single_SF_sr.jpg"), sr_np)
+            imageio.imwrite(os.path.join(output_folder, "Single_SF_hr.jpg"), hr_np)
 
         if(args['feature_maps_test']):
             rand_dataset_item = random.randint(0, len(dataset)-1)
@@ -260,7 +349,7 @@ if __name__ == '__main__':
                 cell_sizes = torch.ones_like(coords)
 
                 for i in range(cell_sizes.shape[-1]):
-                    cell_sizes[:,i] *= 2 / size[i]
+                    cell_sizes[:,:,i] *= 2 / size[i]
                 
                 lr_upscaled = model(lr, coords, cell_sizes)
                 if(args['mode'] == "2D"):

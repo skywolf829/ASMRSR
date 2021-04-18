@@ -310,23 +310,25 @@ class LIIF_Generator(nn.Module):
 
     def forward(self, lr, locations, cell_sizes):
         #lr_mean = lr.mean()
-        lr_interp = F.grid_sample(lr, locations.flip(-1).unsqueeze(0), 
-            mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
-            align_corners=True)[0].permute(1, 2, 0)
+        #lr_interp = F.grid_sample(lr, locations.flip(-1).unsqueeze(0).repeat(lr.shape[0], 
+        #*[1]*(len(lr.shape)-1)), 
+        #    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+        #    align_corners=True)[0].permute(1, 2, 0)
         features = self.feature_extractor(lr)
         #print("Features shape : " + str(features.shape))
-
+        print(cell_sizes)
         n_dims = len(features.shape[2:])
         if(self.opt['mode'] == "2D"):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
             #print("Padded features " + str(features.shape))
-            features = F.unfold(features, 3, padding=0).view(
-                features.shape[0], features.shape[1] * (3**n_dims), features.shape[2]-2, features.shape[3]-2)
+            features = F.unfold(features, 3, padding=0)
+            features = features.view(
+                features.shape[0], features.shape[1], *lr.shape[2:])
         else:
             features = F.pad(features, [1, 1, 1, 1, 1, 1], mode='reflect')
-            features = F.unfold(features, 3, padding=0).view(
-                features.shape[0], features.shape[1] * (3**n_dims), features.shape[2]-2, 
-                features.shape[3]-2, features.shape[4]-2)
+            features = F.unfold(features, 3, padding=0)
+            features = features.view(
+                features.shape[0], features.shape[1], *lr.shape[2:])
 
         vx_lst = [-1, 1]
         vy_lst = [-1, 1]
@@ -360,12 +362,14 @@ class LIIF_Generator(nn.Module):
                     loc_[:, :, 1] += vy * ry + eps_shift
                     loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
                     q_feat = F.grid_sample(
-                        features, loc_.flip(-1).unsqueeze(0),
+                        features, loc_.flip(-1).unsqueeze(0).repeat(lr.shape[0], 
+                        *[1]*(len(lr.shape)-1)),
                         mode='nearest', align_corners=False)[0]
                         
                     #print("Q feat: " + str(q_feat.shape))
                     q_coord = F.grid_sample(
-                        feat_coord, loc_.flip(-1).unsqueeze(0),
+                        feat_coord, loc_.flip(-1).unsqueeze(0).repeat(lr.shape[0], 
+                        *[1]*(len(lr.shape)-1)),
                         mode='nearest', align_corners=False)[0]
 
                     #print("Q coord: " + str(q_coord.shape))
