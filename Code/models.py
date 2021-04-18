@@ -310,6 +310,9 @@ class LIIF_Generator(nn.Module):
 
     def forward(self, lr, locations, cell_sizes):
         #lr_mean = lr.mean()
+        lr_interp = F.grid_sample(lr, locations.unsqueeze(0), 
+            mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+            align_corners=True)[0].permute(1, 2, 0)
         features = self.feature_extractor(lr)
         #print("Features shape : " + str(features.shape))
 
@@ -336,6 +339,7 @@ class LIIF_Generator(nn.Module):
         #print("Features unfolded : " + str(features.shape))
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
+            
         #print("Feat coord before stuff" + str(feat_coord.shape))
         if(self.opt['mode'] == "2D"):
             feat_coord = feat_coord.permute(2, 0, 1).\
@@ -358,10 +362,12 @@ class LIIF_Generator(nn.Module):
                     q_feat = F.grid_sample(
                         features, loc_.flip(-1).unsqueeze(0),
                         mode='nearest', align_corners=False)[0]
+                        
                     #print("Q feat: " + str(q_feat.shape))
                     q_coord = F.grid_sample(
                         feat_coord, loc_.flip(-1).unsqueeze(0),
                         mode='nearest', align_corners=False)[0]
+
                     #print("Q coord: " + str(q_coord.shape))
                     rel_coord = locations - q_coord.permute(1, 2, 0)
 
@@ -426,4 +432,4 @@ class LIIF_Generator(nn.Module):
             for pred, area in zip(preds, areas):  
                 ret = ret + pred * (area / tot_area).unsqueeze(-1)
         #print("Ret " + str(ret.shape))
-        return ret#+lr_mean
+        return ret+lr_interp.detach()
