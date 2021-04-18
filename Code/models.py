@@ -316,7 +316,6 @@ class LIIF_Generator(nn.Module):
         #    align_corners=True)[0].permute(1, 2, 0)
         features = self.feature_extractor(lr)
         #print("Features shape : " + str(features.shape))
-        print(cell_sizes)
         n_dims = len(features.shape[2:])
         if(self.opt['mode'] == "2D"):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
