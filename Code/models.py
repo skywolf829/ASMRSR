@@ -25,7 +25,7 @@ def save_model(model, opt):
     save_options(opt, folder_to_save_in)
 
 def load_model(opt, device):
-    model = None
+    model = GenericModel(opt)
     folder_to_load_from = os.path.join(save_folder, opt['save_name'])
 
     if not os.path.exists(folder_to_load_from):
@@ -37,11 +37,17 @@ def load_model(opt, device):
         model_params = torch.load(os.path.join(folder_to_load_from, "model.ckpt"),
             map_location=device)
         keys = list(model_params.keys())
+        #print(keys)
         for k in keys:
             if "module." in k:
                 model_params[k[7:]] = model_params[k]
                 del model_params[k]
-        model = GenericModel(opt)
+        keys = list(model_params.keys())
+        for k in keys:
+            if opt['upscale_model'] in k:
+                model_params["upscaling_model."+k] = model_params[k]
+                del model_params[k]
+
         model.load_state_dict(model_params)
 
         print("Successfully loaded model")

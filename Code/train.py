@@ -110,6 +110,8 @@ class Trainer():
         total_time = start_time - end_time
         if(rank == 0):
             print("Time to train: " + str(total_time))
+            save_model(model, self.opt)
+            print("Saved model")
 
     def train_single(self, model, dataset):
         model = model.to(self.opt['device'])
@@ -183,6 +185,8 @@ class Trainer():
         end_time = time.time()
         total_time = start_time - end_time
         print("Time to train: " + str(total_time))
+        save_model(model, self.opt)
+        print("Saved model")
 
     def train(self, model, dataset):
         torch.manual_seed(0b10101010101010101010101010101010)
