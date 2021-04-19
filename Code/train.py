@@ -66,7 +66,7 @@ class Trainer():
                 #print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
                     mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
-                    align_corners=True, recompute_scale_factor=False)
+                    align_corners=False, recompute_scale_factor=False)
                 if(rank == 0):
                     lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
                         [2, 0, 1])[0:3]).unsqueeze(0)
@@ -145,7 +145,7 @@ class Trainer():
 
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
                     mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
-                    align_corners=True, recompute_scale_factor=False)
+                    align_corners=False, recompute_scale_factor=False)
                 lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
                         [2, 0, 1])[0:3]).unsqueeze(0)
                 lr_im = F.interpolate(lr_im, mode='nearest', size=hr_im.shape[2:])

@@ -3,9 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
-from options import save_options, load_options, Options
-import numpy as np
-from math import ceil
+from options import save_options
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
 
@@ -43,7 +41,7 @@ def load_model(opt, device):
             if "module." in k:
                 model_params[k[7:]] = model_params[k]
                 del model_params[k]
-        model = LIIF_Generator(opt)
+        model = GenericModel(opt)
         model.load_state_dict(model_params)
 
         print("Successfully loaded model")
@@ -287,13 +285,12 @@ class RDN(nn.Module):
         out = self.final_conv(out)
         return out+x
 
-class LIIF_Generator(nn.Module):
+class LIIF(nn.Module):
     def __init__(self, opt):
-        super(LIIF_Generator, self).__init__()
+        super(LIIF, self).__init__()
         self.opt = opt
         n_dims = 2
 
-        self.feature_extractor = RDN(opt)     
         self.LIIF = nn.ModuleList([
             nn.Linear(opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims, 256),
             nn.ReLU(),
@@ -308,26 +305,20 @@ class LIIF_Generator(nn.Module):
         self.LIIF = nn.Sequential(*self.LIIF)
         self.apply(weights_init)
 
-    def forward(self, lr, locations, cell_sizes):
-        #lr_mean = lr.mean()
-        #lr_interp = F.grid_sample(lr, locations.flip(-1).unsqueeze(0).repeat(lr.shape[0], 
-        #*[1]*(len(lr.shape)-1)), 
-        #    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
-        #    align_corners=True)[0].permute(1, 2, 0)
-        features = self.feature_extractor(lr)
-        #print("Features shape : " + str(features.shape))
-        n_dims = len(features.shape[2:])
+    def forward(self, features, locations, cell_sizes):
+        
+        lr_shape = features.shape
+        
         if(self.opt['mode'] == "2D"):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
-            #print("Padded features " + str(features.shape))
             features = F.unfold(features, 3, padding=0)
             features = features.view(
-                features.shape[0], features.shape[1], *lr.shape[2:])
+                features.shape[0], features.shape[1], *lr_shape[2:])
         else:
             features = F.pad(features, [1, 1, 1, 1, 1, 1], mode='reflect')
             features = F.unfold(features, 3, padding=0)
             features = features.view(
-                features.shape[0], features.shape[1], *lr.shape[2:])
+                features.shape[0], features.shape[1], *lr_shape[2:])
 
         vx_lst = [-1, 1]
         vy_lst = [-1, 1]
@@ -337,18 +328,17 @@ class LIIF_Generator(nn.Module):
         if(self.opt['mode']== "3D"):
             rz = 2 / features.shape[4] / 2
             vz_lst = [-1, 1]
-        #print("Features unfolded : " + str(features.shape))
+
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
             
-        #print("Feat coord before stuff" + str(feat_coord.shape))
         if(self.opt['mode'] == "2D"):
             feat_coord = feat_coord.permute(2, 0, 1).\
                 unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
         else:
             feat_coord = feat_coord.permute(3, 0, 1, 2).\
                 unsqueeze(0).expand(features.shape[0], 3, *features.shape[2:])
-        #print("Feat coord " + str(feat_coord.shape))
+
         preds = []
         areas = []
         
@@ -361,14 +351,14 @@ class LIIF_Generator(nn.Module):
                     loc_[:, :, 1] += vy * ry + eps_shift
                     loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
                     q_feat = F.grid_sample(
-                        features, loc_.flip(-1).unsqueeze(0).repeat(lr.shape[0], 
-                        *[1]*(len(lr.shape)-1)),
+                        features, loc_.flip(-1).unsqueeze(0).repeat(lr_shape[0], 
+                        *[1]*(len(lr_shape)-1)),
                         mode='nearest', align_corners=False)[0]
                         
                     #print("Q feat: " + str(q_feat.shape))
                     q_coord = F.grid_sample(
-                        feat_coord, loc_.flip(-1).unsqueeze(0).repeat(lr.shape[0], 
-                        *[1]*(len(lr.shape)-1)),
+                        feat_coord, loc_.flip(-1).unsqueeze(0).repeat(lr_shape[0], 
+                        *[1]*(len(lr_shape)-1)),
                         mode='nearest', align_corners=False)[0]
 
                     #print("Q coord: " + str(q_coord.shape))
@@ -434,5 +424,24 @@ class LIIF_Generator(nn.Module):
             
             for pred, area in zip(preds, areas):  
                 ret = ret + pred * (area / tot_area).unsqueeze(-1)
-        #print("Ret " + str(ret.shape))
-        return ret#+lr_interp.detach()
+
+        return ret
+
+class GenericModel(nn.Module):
+    def __init__(self, opt):
+        super(GenericModel, self).__init__()
+        self.opt = opt
+        n_dims = 2 if self.opt['mode'] == '3D' else 3
+
+        if(self.opt['feat_model'] == "RDN"):
+            self.feature_extractor = RDN(opt)
+        elif(self.opt['feat_model'] == "RRDN"):
+            self.feature_extractor = RRDN(opt)
+        
+        if(self.opt['upscale_model'] == "LIIF"):
+            self.upscaling_model = LIIF(opt)
+        
+    def forward(self, lr, locations, cell_sizes):
+        features = self.feature_extractor(lr)
+        points = self.upscaling_model(features, locations, cell_sizes)
+        return points

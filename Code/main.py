@@ -1,7 +1,7 @@
 from utility_functions import str2bool
 from options import *
 from datasets import LocalDataset
-from models import LIIF_Generator, load_model
+from models import GenericModel, load_model
 from train import Trainer
 import argparse
 import os
@@ -11,6 +11,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train on an input that is 2D')
 
     parser.add_argument('--mode',default=None,help='The type of input - 2D, 3D')
+    parser.add_argument('--feat_model',default=None,type=str,help='Feature extraction model')
+    parser.add_argument('--upscale_model',default=None,type=str,help='Upscaling model')
     parser.add_argument('--data_folder',default=None,type=str,help='File to train on')
     parser.add_argument('--num_training_examples',default=None,type=int,help='Frames to use from training file')
     parser.add_argument('--save_folder',default=None, help='The folder to save the models folder into')
@@ -93,7 +95,7 @@ if __name__ == '__main__':
             if args[k] is not None:
                 opt[k] = args[k]
         dataset = LocalDataset(opt)
-        model = LIIF_Generator(opt)
+        model = GenericModel(opt)
 
     else:        
         opt = load_options(os.path.join(save_folder, args["load_from"]))
