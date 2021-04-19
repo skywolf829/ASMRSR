@@ -293,7 +293,7 @@ class LIIF_Generator(nn.Module):
         self.opt = opt
         n_dims = 2
 
-        self.feature_extractor = RRDN(opt)     
+        self.feature_extractor = RDN(opt)     
         self.LIIF = nn.ModuleList([
             nn.Linear(opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims, 256),
             nn.ReLU(),
