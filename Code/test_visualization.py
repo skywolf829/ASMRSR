@@ -54,7 +54,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 480
+    opt['cropping_resolution'] = 1024
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
@@ -122,7 +122,7 @@ if __name__ == '__main__':
 
             coords = make_coord(hr.shape[2:], args['device'], flatten=False)
             cell_sizes = torch.ones_like(coords)
-            print(cell_sizes.shape)
+
             for i in range(cell_sizes.shape[-1]):
                 cell_sizes[:,:,i] *= 2 / size[i]
             
