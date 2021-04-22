@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.modules.activation import SiLU
 from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
 from options import save_options
@@ -57,6 +58,30 @@ def load_model(opt, device):
         print("Warning: model.ckpt doesn't exists - can't load these model parameters")
    
     return model
+
+class ResidueBlock(nn.Module):
+    def __init__(self, channels_in, channels_out, opt):
+        super(ResidueBlock, self).__init__()
+        if(opt['mode'] == "2D"):
+            conv_layer = nn.Conv2d
+            batchnorm_layer = nn.BatchNorm2d
+        elif(opt['mode'] == "3D"):
+            conv_layer = nn.Conv3d
+            batchnorm_layer = nn.BatchNorm3d
+        self.block = nn.Sequential(
+            conv_layer(channels_in, channels_out, 1),
+            batchnorm_layer(channels_out),
+            nn.ReLU(),
+            conv_layer(channels_out, channels_out, 3, padding=1),
+            batchnorm_layer(channels_out),
+            nn.ReLU(),
+            conv_layer(channels_out, channels_out, 1),
+            batchnorm_layer(channels_out)
+        )
+
+    def forward(self,x):       
+        y = self.block(x)
+        return F.relu(x+y)
 
 class DenseBlock(nn.Module):
     def __init__(self, kernels, growth_channel, opt):
@@ -293,6 +318,86 @@ class RDN(nn.Module):
         out = self.final_conv(out)
         return out+x
 
+class UNet(nn.Module):
+    def __init__ (self,opt):
+        super(UNet, self).__init__()
+
+        self.blocks = nn.ModuleList(
+            [
+                ResidueBlock(opt['num_channels'], 16, opt),
+                ResidueBlock(16, 32, opt),
+                ResidueBlock(32, 64, opt),
+                ResidueBlock(64, 128, opt),
+                ResidueBlock(128, 256, opt),
+                ResidueBlock(256, 64, opt),
+                ResidueBlock(128, 32, opt),
+                ResidueBlock(64, 16, opt),
+                ResidueBlock(32, 8, opt)
+            ]
+        )
+        if(self.opt['mode'] == "2D"):
+            self.maxpool = nn.MaxPool2d(2)
+        else:
+            self.maxpool = nn.MaxPool3d(2)
+
+    def forward(self, x):
+        x1 = self.blocks[0](x)
+        x2 = self.maxpool(self.blocks[1](x1))
+        x3 = self.maxpool(self.blocks[2](x2))
+        x4 = self.maxpool(self.blocks[3](x3))
+        x5 = self.maxpool(self.blocks[4](x4))
+
+        x6 = self.blocks[5](F.interpolate(x5, scale_factor=2, mode='nearest'))
+        x6 = torch.cat([x6, x4], dim=1)
+
+        x7 = self.blocks[6](F.interpolate(x6, scale_factor=2, mode='nearest'))
+        x7 = torch.cat([x7, x3], dim=1)
+
+        x8 = self.blocks[7](F.interpolate(x7, scale_factor=2, mode='nearest'))
+        x8 = torch.cat([x8, x2], dim=1)
+
+        x9 = self.blocks[8](F.interpolate(x8, scale_factor=2, mode='nearest'))
+        x9 = torch.cat([x9, x1], dim=1)
+
+        return x9
+
+class MFFN(nn.Module):
+    def __init__(self, opt):
+        super(MFFN, self).__init__()
+        self.opt = opt
+        n_dims = 2
+        num_input = 32+opt['num_dims']
+        self.MFFN = nn.ModuleList([
+            nn.Linear(num_input, 512),
+            nn.SiLU(),
+            nn.Linear(num_input+512, 256),
+            nn.SiLU(),
+            nn.Linear(num_input+256, 128),
+            nn.SiLU(),
+            nn.Linear(num_input+128, 64),
+            nn.SiLU(),
+            nn.Linear(num_input+64, 32),
+            nn.SiLU(),
+            nn.Linear(32, opt['num_channels'])
+        ])
+        
+        self.apply(weights_init)
+
+    def forward(self, features, locations, cell_sizes=None):
+        lr_shape = features.shape
+        
+        context_vectors = F.grid_sample(features, locations, 
+            mode='bilinear' if self.opt['mode'] == "2D" else 'trilinear',
+            align_corners=False)
+        context_vectors = torch.cat([context_vectors, locations], dim=1)
+
+        x = self.MFFN[1](self.MFFN[0](context_vectors))
+        x = self.MFFN[3](self.MFFN[2](torch.cat(x, context_vectors), dim=1))
+        x = self.MFFN[5](self.MFFN[4](torch.cat(x, context_vectors), dim=1))
+        x = self.MFFN[7](self.MFFN[6](torch.cat(x, context_vectors), dim=1))
+        x = self.MFFN[9](self.MFFN[8](torch.cat(x, context_vectors), dim=1))
+        return x
+
 class LIIF(nn.Module):
     def __init__(self, opt):
         super(LIIF, self).__init__()
@@ -445,9 +550,13 @@ class GenericModel(nn.Module):
             self.feature_extractor = RDN(opt)
         elif(self.opt['feat_model'] == "RRDN"):
             self.feature_extractor = RRDN(opt)
+        elif(self.opt['feat_model'] == "UNet"):
+            self.feature_extractor = UNet(opt)
         
         if(self.opt['upscale_model'] == "LIIF"):
             self.upscaling_model = LIIF(opt)
+        elif(self.opt['upscale_model'] == "MFFN"):
+            self.upscaling_model = MFFN(opt)
         
     def forward(self, lr, locations, cell_sizes):
         features = self.feature_extractor(lr)
