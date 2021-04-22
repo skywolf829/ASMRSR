@@ -1,7 +1,7 @@
 from utility_functions import str2bool, to_pixel_samples, PSNR, ssim, ssim3D, make_coord
 from options import *
 from datasets import LocalDataset
-from models import load_model, LIIF_Generator
+from models import load_model
 from train import Trainer
 import argparse
 import os
