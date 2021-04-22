@@ -1,4 +1,4 @@
-from utility_functions import make_coord, str2bool, to_img, PSNR
+from utility_functions import make_coord, str2bool, to_img, PSNR, to_pixel_samples, make_residual_weight_grid
 from options import *
 from datasets import LocalDataset
 from models import load_model
@@ -19,7 +19,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_folder',default="isomag2D",type=str,help='Folder to test on')
     parser.add_argument('--load_from',default="isomag2D",type=str,help='Model to load and test')
     parser.add_argument('--device',default="cuda:0",type=str,help='Device to evaluate on')
-    parser.add_argument('--max_sf',default=4.0,type=float,help='Max SR factor to test')
+    parser.add_argument('--max_sf',default=8.0,type=float,help='Max SR factor to test')
 
     parser.add_argument('--increasing_size_test',default="false",type=str2bool,
         help='Gradually increase output size test')
@@ -29,11 +29,15 @@ if __name__ == '__main__':
         help='Perform histogram test on inputs/outputs/target')
     parser.add_argument('--patchwise_reconstruction_test',default="false",type=str2bool,
         help='Patchwise reconstruction for a full image')
-    parser.add_argument('--interpolation_comparison',default="true",type=str2bool,
+    parser.add_argument('--interpolation_comparison',default="false",type=str2bool,
         help='Linear interoplation comparison')
     parser.add_argument('--feature_maps_test',default="false",type=str2bool,
         help='Save feature maps for some output')
     parser.add_argument('--increasing_sr_test',default="false",type=str2bool,
+        help='Gradually increase SR factor test')
+
+        
+    parser.add_argument('--weight_grid_test',default="true",type=str2bool,
         help='Gradually increase SR factor test')
         
 
@@ -55,7 +59,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 64
+    opt['cropping_resolution'] = 16
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
@@ -436,3 +440,57 @@ if __name__ == '__main__':
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0, 0), 1)
                 img_sequence.append(full_im)
             imageio.mimwrite(os.path.join(output_folder, "IncreasingSRTest.gif"), img_sequence)
+
+        if(args['weight_grid_test']):
+            ex_hr = torch.rand([1, 1, opt['cropping_resolution'], opt['cropping_resolution']], 
+                device=opt['device'], dtype=torch.float32)
+            hr_coords, hr_pix = to_pixel_samples(ex_hr, flatten=False)
+            
+            up_size = 256
+            
+            hr_coords_color = hr_coords.clone()
+            hr_coords_color += 1
+            hr_coords_color *= (up_size/2)
+            hr_coords_color = hr_coords_color.type(torch.LongTensor)
+
+            ims = []
+            for s in range(opt['cropping_resolution'], 
+                int(opt['cropping_resolution']/args['max_sf']), -1):
+                print(s)
+                ex_lr = F.interpolate(ex_hr, size=[s, s],
+                        mode = "bilinear" if opt['mode'] == "2D" else "trilinear",
+                        align_corners=False, recompute_scale_factor=False)
+
+                rel_coord = make_residual_weight_grid(ex_lr, hr_coords, opt['mode']).expand(-1, 3, -1, -1).contiguous()
+                
+                rel_coord = F.interpolate(rel_coord, size=[up_size, up_size], mode='nearest')
+
+                lr_coord = make_coord(ex_lr.shape[2:], device=ex_lr.device,
+                    flatten=False)
+                lr_coord += 1
+                lr_coord *= (up_size/2)
+                lr_coord = lr_coord.type(torch.LongTensor)
+
+                for i in range(lr_coord.shape[0]):
+                    for j in range(lr_coord.shape[1]):
+                        x = lr_coord[i,j,0].item()
+                        y = lr_coord[i,j,1].item()
+                        rel_coord[0, 0, x-1:x+2, y-1:y+2] = 1.0
+                        rel_coord[0, 1, x-1:x+2, y-1:y+2] = 0.0
+                        rel_coord[0, 2, x-1:x+2, y-1:y+2] = 0.0
+                
+                for i in range(hr_coords_color.shape[0]):
+                    for j in range(hr_coords_color.shape[1]):
+                        x = hr_coords_color[i,j,0].item()
+                        y = hr_coords_color[i,j,1].item()
+                        rel_coord[0, 0, x-1:x+2, y-1:y+2] = 0.0
+                        rel_coord[0, 1, x-1:x+2, y-1:y+2] = 1.0
+                        rel_coord[0, 2, x-1:x+2, y-1:y+2] = 0.0
+                
+                
+                im = rel_coord[0].permute(1, 2, 0).cpu().detach().numpy() * 255
+                im = im.astype(np.uint8)
+                print(im.shape)
+                for k in range(10):
+                    ims.append(im)
+            imageio.mimwrite(os.path.join(output_folder, "ResidualWeights.gif"), ims)

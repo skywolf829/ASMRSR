@@ -8,6 +8,7 @@ class Options():
         opt["mode"]                    = "2D"      # What SinGAN to use - 2D or 3D
         opt["feat_model"]              = "RDN"      # What SinGAN to use - 2D or 3D
         opt["upscale_model"]           = "LIIF"      # What SinGAN to use - 2D or 3D
+        opt['residual_weighing']       = False
         opt["data_folder"]             = "TrainingData/isomag2D"
         opt['scaling_mode']            = None # magnitude, channel, learned, none
         opt['load_data_at_start']      = False
@@ -29,6 +30,7 @@ class Options():
         opt['num_dims']                = 3
         opt['random_flipping']         = True
         opt['num_networked_workers']   = 4
+
 
         opt["num_workers"]             = 2
 

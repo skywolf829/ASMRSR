@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.modules import conv
 from torch.nn.modules.activation import SiLU
 from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
@@ -78,10 +79,14 @@ class ResidueBlock(nn.Module):
             conv_layer(channels_out, channels_out, 1),
             batchnorm_layer(channels_out)
         )
+        if(channels_in != channels_out):
+            self.c1 = conv_layer(channels_in, channels_out, 3, padding=1)
+        else:
+            self.c1 = nn.Identity()
 
     def forward(self,x):       
         y = self.block(x)
-        return F.relu(x+y)
+        return F.relu(self.c1(x)+y)
 
 class DenseBlock(nn.Module):
     def __init__(self, kernels, growth_channel, opt):
@@ -321,52 +326,58 @@ class RDN(nn.Module):
 class UNet(nn.Module):
     def __init__ (self,opt):
         super(UNet, self).__init__()
-
+        self.opt = opt
         self.blocks = nn.ModuleList(
             [
                 ResidueBlock(opt['num_channels'], 16, opt),
                 ResidueBlock(16, 32, opt),
                 ResidueBlock(32, 64, opt),
                 ResidueBlock(64, 128, opt),
+
                 ResidueBlock(128, 256, opt),
+
+                ResidueBlock(256, 128, opt),
                 ResidueBlock(256, 64, opt),
                 ResidueBlock(128, 32, opt),
-                ResidueBlock(64, 16, opt),
-                ResidueBlock(32, 8, opt)
+                ResidueBlock(64, 16, opt)
             ]
         )
         if(self.opt['mode'] == "2D"):
-            self.maxpool = nn.MaxPool2d(2)
+            self.maxpool = nn.MaxPool2d(2, stride=2)
         else:
-            self.maxpool = nn.MaxPool3d(2)
+            self.maxpool = nn.MaxPool3d(2, stride=2)
 
     def forward(self, x):
-        x1 = self.blocks[0](x)
-        x2 = self.maxpool(self.blocks[1](x1))
-        x3 = self.maxpool(self.blocks[2](x2))
-        x4 = self.maxpool(self.blocks[3](x3))
-        x5 = self.maxpool(self.blocks[4](x4))
+        x0 = self.blocks[0](x) # c=16
+        x1 = self.maxpool(self.blocks[1](x0))  # c=32
+        x2 = self.maxpool(self.blocks[2](x1))  # c=64
+        x3 = self.maxpool(self.blocks[3](x2))  # c=128
 
-        x6 = self.blocks[5](F.interpolate(x5, scale_factor=2, mode='nearest'))
-        x6 = torch.cat([x6, x4], dim=1)
+        x4 = self.maxpool(self.blocks[4](x3))  # c=256
 
-        x7 = self.blocks[6](F.interpolate(x6, scale_factor=2, mode='nearest'))
-        x7 = torch.cat([x7, x3], dim=1)
+        y3 = self.blocks[5](F.interpolate(x4, size=x3.shape[2:], mode='nearest'))
+        y3 = torch.cat([y3, x3], dim=1)
 
-        x8 = self.blocks[7](F.interpolate(x7, scale_factor=2, mode='nearest'))
-        x8 = torch.cat([x8, x2], dim=1)
+        y2 = self.blocks[6](F.interpolate(y3, size=x2.shape[2:], mode='nearest'))
+        y2 = torch.cat([y2, x2], dim=1)
 
-        x9 = self.blocks[8](F.interpolate(x8, scale_factor=2, mode='nearest'))
-        x9 = torch.cat([x9, x1], dim=1)
+        y1 = self.blocks[7](F.interpolate(y2, size=x1.shape[2:], mode='nearest'))
+        y1 = torch.cat([y1, x1], dim=1)
 
-        return x9
+        y0 = self.blocks[8](F.interpolate(y1, size=x0.shape[2:], mode='nearest'))
+        y0 = torch.cat([y0, x0], dim=1)
+
+        return y0
 
 class MFFN(nn.Module):
     def __init__(self, opt):
         super(MFFN, self).__init__()
         self.opt = opt
-        n_dims = 2
-        num_input = 32+opt['num_dims']
+        num_input = 32
+        if(self.opt['mode'] == "2D"):
+            num_input += 2
+        else:
+            num_input += 3
         self.MFFN = nn.ModuleList([
             nn.Linear(num_input, 512),
             nn.SiLU(),
@@ -386,17 +397,22 @@ class MFFN(nn.Module):
     def forward(self, features, locations, cell_sizes=None):
         lr_shape = features.shape
         
-        context_vectors = F.grid_sample(features, locations, 
+        context_vectors = F.grid_sample(features, locations.flip(-1).unsqueeze(0), 
             mode='bilinear' if self.opt['mode'] == "2D" else 'trilinear',
             align_corners=False)
-        context_vectors = torch.cat([context_vectors, locations], dim=1)
-
+        context_vectors = torch.cat([context_vectors, 
+            locations.flip(-1).permute(2, 0, 1).unsqueeze(0)], dim=1)
+        if(self.opt['mode'] == "2D"):
+            context_vectors = context_vectors.permute(0, 2, 3, 1).contiguous()
+        else:
+            context_vectors = context_vectors.permute(0, 2, 3, 4, 1).contiguous()
         x = self.MFFN[1](self.MFFN[0](context_vectors))
-        x = self.MFFN[3](self.MFFN[2](torch.cat(x, context_vectors), dim=1))
-        x = self.MFFN[5](self.MFFN[4](torch.cat(x, context_vectors), dim=1))
-        x = self.MFFN[7](self.MFFN[6](torch.cat(x, context_vectors), dim=1))
-        x = self.MFFN[9](self.MFFN[8](torch.cat(x, context_vectors), dim=1))
-        return x
+        x = self.MFFN[3](self.MFFN[2](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[5](self.MFFN[4](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[7](self.MFFN[6](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[9](self.MFFN[8](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[10](x)
+        return x[0]
 
 class LIIF(nn.Module):
     def __init__(self, opt):
@@ -419,7 +435,6 @@ class LIIF(nn.Module):
         self.apply(weights_init)
 
     def forward(self, features, locations, cell_sizes):
-        
         lr_shape = features.shape
         
         if(self.opt['mode'] == "2D"):

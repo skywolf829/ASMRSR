@@ -26,6 +26,38 @@ def load_obj(location):
 def l2normalize(v, eps=1e-12):
     return v / (v.norm() + eps)
 
+def make_residual_weight_grid(real_lr, hr_coords, mode):    
+    lr_coord = make_coord(real_lr.shape[2:], device=real_lr.device,
+        flatten=False)
+
+    if(mode == "2D"):
+        lr_coord = lr_coord.permute(2, 0, 1).\
+            unsqueeze(0).expand(real_lr.shape[0], 2, *real_lr.shape[2:])
+    else:
+        lr_coord = lr_coord.permute(3, 0, 1, 2).\
+            unsqueeze(0).expand(real_lr.shape[0], 3, *real_lr.shape[2:])
+    q_coord = F.grid_sample(
+        lr_coord, hr_coords.flip(-1).unsqueeze(0),
+        mode='nearest', align_corners=False)[0]
+    #print("Q coord: " + str(q_coord.shape))
+    rel_coord = hr_coords - q_coord.permute(1, 2, 0)
+
+    for c in range(2, len(real_lr.shape)):
+        if mode == "2D":
+            rel_coord[:,:,c-2] *= real_lr.shape[c]
+        else:
+            rel_coord[:,:,:,c-2] *= real_lr.shape[c]
+            
+    rel_coord = torch.norm(rel_coord, dim=-1)
+    rel_coord *= (1/(2**0.5))
+
+    rel_coord = rel_coord.unsqueeze(0).unsqueeze(0)
+    if(mode == "2D"):
+        rel_coord = rel_coord.expand(real_lr.shape[0], real_lr.shape[1], -1, -1)
+    else:
+        rel_coord = rel_coord.expand(real_lr.shape[0], real_lr.shape[1], -1, -1, -1)
+    return rel_coord
+
 def make_coord(shape, device, flatten=True):
     """ 
     Make coordinates at grid centers.

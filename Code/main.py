@@ -13,6 +13,7 @@ if __name__ == '__main__':
     parser.add_argument('--mode',default=None,help='The type of input - 2D, 3D')
     parser.add_argument('--feat_model',default=None,type=str,help='Feature extraction model')
     parser.add_argument('--upscale_model',default=None,type=str,help='Upscaling model')
+    parser.add_argument('--residual_weighing',default=None,type=str2bool,help='Use residual weighing')
     parser.add_argument('--data_folder',default=None,type=str,help='File to train on')
     parser.add_argument('--num_training_examples',default=None,type=int,help='Frames to use from training file')
     parser.add_argument('--save_folder',default=None, help='The folder to save the models folder into')
