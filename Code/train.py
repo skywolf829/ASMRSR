@@ -89,26 +89,16 @@ class Trainer():
                     sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
                         self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
 
-                if(opt['residual_weighing']):
-                    lr_interp = F.grid_sample(real_lr, hr_coords, 
+                if(self.opt['residual_weighing']):
+                    lr_interp = F.grid_sample(real_lr, hr_coords.flip(-1).unsqueeze(0), 
                         mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
-                        align_corners=False, recompute_scale_factor=False)
-                    lr_coord = make_coord(real_lr.shape[2:], device=self.opt['device'],
-                        flatten=False)
-                    if(self.opt['mode'] == "2D"):
-                        feat_coord = feat_coord.permute(2, 0, 1).\
-                            unsqueeze(0).expand(real_lr.shape[0], 2, *real_lr.shape[2:])
-                    else:
-                        feat_coord = feat_coord.permute(3, 0, 1, 2).\
-                            unsqueeze(0).expand(real_lr.shape[0], 3, *real_lr.shape[2:])
-                    q_coord = F.grid_sample(
-                        feat_coord, hr_coords.flip(-1).unsqueeze(0).repeat(real_lr[0], 
-                        *[1]*(len(real_lr)-1)),
-                        mode='nearest', align_corners=False)[0]
-
-                    #print("Q coord: " + str(q_coord.shape))
-                    rel_coord = hr_coords - q_coord.permute(1, 2, 0)
-                    print(rel_coord.shape)
+                        align_corners=False)
+                    
+                    rel_coord = make_residual_weight_grid(real_lr, hr_coords, self.opt['mode'])
+                    #print(rel_coord)
+                    lr_interp *= (1-rel_coord)
+                    lr_upscaled *= rel_coord
+                    lr_upscaled += lr_interp.detach()
 
                 L1 = L1loss(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
                 L1.backward()

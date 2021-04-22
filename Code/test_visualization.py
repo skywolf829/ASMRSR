@@ -19,7 +19,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_folder',default="isomag2D",type=str,help='Folder to test on')
     parser.add_argument('--load_from',default="isomag2D",type=str,help='Model to load and test')
     parser.add_argument('--device',default="cuda:0",type=str,help='Device to evaluate on')
-    parser.add_argument('--max_sf',default=8.0,type=float,help='Max SR factor to test')
+    parser.add_argument('--max_sf',default=4.0,type=float,help='Max SR factor to test')
 
     parser.add_argument('--increasing_size_test',default="false",type=str2bool,
         help='Gradually increase output size test')
@@ -59,7 +59,7 @@ if __name__ == '__main__':
         if args[k] is not None:
             opt[k] = args[k]
             
-    opt['cropping_resolution'] = 16
+    opt['cropping_resolution'] = 64
     opt['data_folder'] = os.path.join(input_folder, args['data_folder'])
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
@@ -446,7 +446,7 @@ if __name__ == '__main__':
                 device=opt['device'], dtype=torch.float32)
             hr_coords, hr_pix = to_pixel_samples(ex_hr, flatten=False)
             
-            up_size = 256
+            up_size = 512
             
             hr_coords_color = hr_coords.clone()
             hr_coords_color += 1
@@ -455,7 +455,7 @@ if __name__ == '__main__':
 
             ims = []
             for s in range(opt['cropping_resolution'], 
-                int(opt['cropping_resolution']/args['max_sf']), -1):
+                int(opt['cropping_resolution']/args['max_sf'])-1, -1):
                 print(s)
                 ex_lr = F.interpolate(ex_hr, size=[s, s],
                         mode = "bilinear" if opt['mode'] == "2D" else "trilinear",
@@ -494,3 +494,4 @@ if __name__ == '__main__':
                 for k in range(10):
                     ims.append(im)
             imageio.mimwrite(os.path.join(output_folder, "ResidualWeights.gif"), ims)
+            imageio.mimwrite(os.path.join(output_folder, "ResidualWeights.mp4"), ims)
