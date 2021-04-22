@@ -1,7 +1,7 @@
 #!/bin/sh
 cd /lus/theta-fs0/projects/DL4VIS/ASMRSR
 
-python3 Code/main.py --save_name isomag2D_MFFN --train_distributed True --num_workers 8 \
+python3 Code/main.py --save_name isomag2D_RDB5_64_resweigh --train_distributed True --num_workers 8 \
 --data_folder TrainingData/isomag2D --mode 2D --patch_size 1024 \
 --training_patch_size 512 --cropping_resolution 512 \
 --feat_model RDN --upscale_model LIIF \
