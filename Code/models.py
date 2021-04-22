@@ -42,11 +42,13 @@ def load_model(opt, device):
             if "module." in k:
                 model_params[k[7:]] = model_params[k]
                 del model_params[k]
+        '''
         keys = list(model_params.keys())
         for k in keys:
             if opt['upscale_model'] in k:
                 model_params["upscaling_model."+k] = model_params[k]
                 del model_params[k]
+        '''
 
         model.load_state_dict(model_params)
 
