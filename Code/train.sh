@@ -7,4 +7,4 @@ python3 Code/main.py --save_name isomag2D_RDB5_64_LIIFskip --train_distributed T
 --feat_model RDN --upscale_model LIIF_skip \
 --num_blocks 5 --base_num_kernels 64 \
 --x_resolution 1024 --y_resolution 1024 --epochs 1000 \
---scale_factor_start 1 --scale_factor_end 4 --residual_weighing true
+--scale_factor_start 1 --scale_factor_end 4 --residual_weighing false
