@@ -59,9 +59,12 @@ class Trainer():
                 real_shape = real_hr.shape
                 #print(real_hr.dtype)
                 #print("Full shape : " + str(real_hr.shape))
-                scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
-                    (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
-                        self.opt['scale_factor_start']
+                if(epoch > 100):
+                    scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
+                        (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
+                            self.opt['scale_factor_start']
+                else:
+                    scale_factor = 1.0
                 #scale_factor = 1
                 #print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
@@ -152,8 +155,11 @@ class Trainer():
                 hr_im = torch.from_numpy(np.transpose(to_img(real_hr, self.opt['mode']), 
                         [2, 0, 1])[0:3]).unsqueeze(0)
                 real_shape = real_hr.shape
-                scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
-                    (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
+                if(epoch <= 100):
+                    scale_factor = 1.0
+                else:
+                    scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
+                        (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
                         self.opt['scale_factor_start']
 
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
