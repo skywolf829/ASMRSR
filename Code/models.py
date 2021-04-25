@@ -323,6 +323,28 @@ class RDN(nn.Module):
         out = self.final_conv(out)
         return out+x
 
+class RDN_skip(nn.Module):
+    def __init__ (self,opt):
+        super(RDN, self).__init__()
+        if(opt['mode'] == "2D"):
+            conv_layer = nn.Conv2d
+        elif(opt['mode'] == "3D"):
+            conv_layer = nn.Conv3d
+
+        self.first_conv = conv_layer(opt['num_channels'], opt['base_num_kernels'], kernel_size=opt['kernel_size'], padding=1)
+        self.blocks = nn.ModuleList()
+        for i in range(opt['num_blocks']):
+            self.blocks.append(RDB(opt['base_num_kernels'], opt['base_num_kernels'], opt))
+        self.blocks = nn.Sequential(*self.blocks)
+        self.final_conv = conv_layer(opt['base_num_kernels'], opt['base_num_kernels'], kernel_size=opt['kernel_size'], padding=1)
+
+    def forward(self, x):
+        x1 = self.first_conv(x)
+        out = self.blocks(x1)
+        out = self.final_conv(out)
+        out = out + x1
+        return torch.cat([out, x.detach()], dim=1)
+
 class UNet(nn.Module):
     def __init__ (self,opt):
         super(UNet, self).__init__()
@@ -420,6 +442,8 @@ class LIIF(nn.Module):
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
+        if("skip" in opt['feat_model']):
+            latent_vector_size += 1 
         self.LIIF = nn.ModuleList([
             nn.Linear(latent_vector_size, 256),
             nn.Linear(256, 256),
