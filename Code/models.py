@@ -325,7 +325,7 @@ class RDN(nn.Module):
 
 class RDN_skip(nn.Module):
     def __init__ (self,opt):
-        super(RDN, self).__init__()
+        super(RDN_skip, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
         elif(opt['mode'] == "3D"):
@@ -343,7 +343,8 @@ class RDN_skip(nn.Module):
         out = self.blocks(x1)
         out = self.final_conv(out)
         out = out + x1
-        return torch.cat([out, x.detach()], dim=1)
+        out = torch.cat([out, x.detach()], dim=1)
+        return out
 
 class UNet(nn.Module):
     def __init__ (self,opt):
@@ -443,7 +444,7 @@ class LIIF(nn.Module):
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
         if("skip" in opt['feat_model']):
-            latent_vector_size += 1 
+            latent_vector_size += 3**n_dims
         self.LIIF = nn.ModuleList([
             nn.Linear(latent_vector_size, 256),
             nn.Linear(256, 256),
@@ -590,6 +591,8 @@ class LIIF_skip(nn.Module):
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
+        if("skip" in opt['feat_model']):
+            latent_vector_size += 3**n_dims
         self.LIIF = nn.ModuleList([
             nn.Linear(latent_vector_size, 256),
             nn.Linear(256+latent_vector_size, 256),
@@ -738,6 +741,8 @@ class LIIF_skip_res(nn.Module):
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
+        if("skip" in opt['feat_model']):
+            latent_vector_size += 3**n_dims
         self.LIIF = nn.ModuleList([
             nn.Linear(latent_vector_size, 256),
             nn.Linear(256+latent_vector_size, 256),
@@ -883,7 +888,6 @@ class LIIF_skip_res(nn.Module):
 
         return ret
 
-
 class GenericModel(nn.Module):
     def __init__(self, opt):
         super(GenericModel, self).__init__()
@@ -892,6 +896,8 @@ class GenericModel(nn.Module):
 
         if(self.opt['feat_model'] == "RDN"):
             self.feature_extractor = RDN(opt)
+        elif(self.opt['feat_model'] == "RDN_skip"):
+            self.feature_extractor = RDN_skip(opt)
         elif(self.opt['feat_model'] == "RRDN"):
             self.feature_extractor = RRDN(opt)
         elif(self.opt['feat_model'] == "UNet"):
