@@ -14,8 +14,9 @@ if __name__ == '__main__':
 
     parser.add_argument('--mode',default="2D",help='The type of input - 2D, 3D')
     parser.add_argument('--data_folder',default="isomag2D",type=str,help='Folder to test on')
-    parser.add_argument('--load_from',default="isomag2D",type=str,help='Model to load and test')
+    parser.add_argument('--load_from',default="Temp",type=str,help='Model to load and test')
     parser.add_argument('--device',default="cuda:0",type=str,help='Device to evaluate on')
+    parser.add_argument('--bilinear',default="false",type=str2bool)
 
     args = vars(parser.parse_args())
 
@@ -37,6 +38,8 @@ if __name__ == '__main__':
     model = load_model(opt,args["device"]).to(args['device'])
     dataset = LocalDataset(opt)
 
+    use_bilin = args['bilinear']
+
     scale_factor_to_test = np.arange(1, 33)
     psnrs = []
     ssims = []
@@ -56,19 +59,21 @@ if __name__ == '__main__':
                         mode='bilinear' if opt['mode'] == "2D" else "trilinear",
                         align_corners=False, recompute_scale_factor=False)
 
-                coords = make_coord(hr.shape[2:], args['device'], flatten=False)
-                cell_sizes = torch.ones_like(coords)
+                if(not use_bilin):
+                    coords = make_coord(hr.shape[2:], args['device'], flatten=False)
+                    cell_sizes = torch.ones_like(coords)
 
-                for i in range(cell_sizes.shape[-1]):
-                    cell_sizes[:,:,i] *= 2 / size[i]
-                
-                lr_upscaled = model(lr, coords, cell_sizes)
-                if(args['mode'] == "2D"):
-                    lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
-                else:                    
-                    lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                    for i in range(cell_sizes.shape[-1]):
+                        cell_sizes[:,:,i] *= 2 / size[i]
                     
-
+                    lr_upscaled = model(lr, coords, cell_sizes)
+                    if(args['mode'] == "2D"):
+                        lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
+                    else:                    
+                        lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                else:
+                    lr_upscaled = F.interpolate(lr, size=hr.shape[2:],
+                        align_corners=False, mode="bilinear" if args['mode'] == "2D" else "trilinear")
                 p = PSNR(lr_upscaled, hr)
                 #if(args['mode'] == "2D"):
                 #    s = ssim()
