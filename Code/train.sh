@@ -7,4 +7,4 @@ python3 Code/main.py --save_name isomag2D_RDN5_64kernels_LIIFskip_48patch_noinit
 --feat_model RDN --upscale_model LIIF_skip \
 --num_blocks 5 --base_num_kernels 64 \
 --x_resolution 1024 --y_resolution 1024 --epochs 1000 \
---scale_factor_start 1 --scale_factor_end 4 --residual_weighing false
+--scale_factor_start 1 --scale_factor_end 2 --residual_weighing false
