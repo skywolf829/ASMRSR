@@ -585,6 +585,157 @@ class LIIF(nn.Module):
 
         return ret
 
+class LIIF_skip_posonly(nn.Module):
+    def __init__(self, opt):
+        super(LIIF_skip_posonly, self).__init__()
+        self.opt = opt
+        n_dims = 2
+        latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
+        if("skip" in opt['feat_model']):
+            latent_vector_size += 3**n_dims
+        self.pos_skip_size = n_dims+n_dims
+        self.LIIF = nn.ModuleList([
+            nn.Linear(latent_vector_size, 256),
+            nn.Linear(256+self.pos_skip_size, 256),
+            nn.Linear(256+self.pos_skip_size, 256),
+            nn.Linear(256+self.pos_skip_size, 256),
+            nn.Linear(256, opt["num_channels"])
+        ])
+        #self.LIIF = nn.Sequential(*self.LIIF)
+        self.apply(weights_init)
+
+    def LIIF_forward(self, fc_input):
+        x = fc_input
+        pos_info = x[-self.pos_skip_size:].clone().detach()
+        for i in range(len(self.LIIF)-1):
+            x = self.LIIF[i](x)
+            x = F.relu(x)
+            if(i < len(self.LIIF)-2):
+                x = torch.cat([x, pos_info.clone().detach()], dim=-1)
+        x = self.LIIF[-1](x)
+        return x
+
+    def forward(self, features, locations, cell_sizes):
+        lr_shape = features.shape
+        
+        if(self.opt['mode'] == "2D"):
+            features = F.pad(features, [1, 1, 1, 1], mode='reflect')
+            features = F.unfold(features, 3, padding=0)
+            features = features.view(
+                features.shape[0], features.shape[1], *lr_shape[2:])
+        else:
+            features = F.pad(features, [1, 1, 1, 1, 1, 1], mode='reflect')
+            features = F.unfold(features, 3, padding=0)
+            features = features.view(
+                features.shape[0], features.shape[1], *lr_shape[2:])
+
+        vx_lst = [-1, 1]
+        vy_lst = [-1, 1]
+        eps_shift = 1e-6
+        rx = (2 / features.shape[2]) / 2
+        ry = (2 / features.shape[3]) / 2
+        if(self.opt['mode']== "3D"):
+            rz = 2 / features.shape[4] / 2
+            vz_lst = [-1, 1]
+
+        feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
+            flatten=False)
+            
+        if(self.opt['mode'] == "2D"):
+            feat_coord = feat_coord.permute(2, 0, 1).\
+                unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
+        else:
+            feat_coord = feat_coord.permute(3, 0, 1, 2).\
+                unsqueeze(0).expand(features.shape[0], 3, *features.shape[2:])
+
+        preds = []
+        areas = []
+        
+        for vx in vx_lst:
+            for vy in vy_lst:
+                if(self.opt['mode'] == "2D"):
+                    loc_ = locations.clone()
+                    #print("Loc: " + str(loc_.shape))
+                    loc_[:, :, 0] += vx * rx + eps_shift
+                    loc_[:, :, 1] += vy * ry + eps_shift
+                    loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
+                    q_feat = F.grid_sample(
+                        features, loc_.flip(-1).unsqueeze(0).repeat(lr_shape[0], 
+                        *[1]*(len(lr_shape)-1)),
+                        mode='nearest', align_corners=False)[0]
+                        
+                    #print("Q feat: " + str(q_feat.shape))
+                    q_coord = F.grid_sample(
+                        feat_coord, loc_.flip(-1).unsqueeze(0).repeat(lr_shape[0], 
+                        *[1]*(len(lr_shape)-1)),
+                        mode='nearest', align_corners=False)[0]
+
+                    #print("Q coord: " + str(q_coord.shape))
+                    rel_coord = locations - q_coord.permute(1, 2, 0)
+
+                    rel_coord[:, :, 0] *= features.shape[2]
+                    rel_coord[:, :, 1] *= features.shape[3]
+                    
+                    #print("Rel coords: " + str(rel_coord.shape))
+                    fc_input = torch.cat([q_feat.permute(1, 2, 0).contiguous(), rel_coord], dim=-1)
+                    #print("fc_input : " + str(fc_input.shape))
+
+                    rel_cell = cell_sizes.clone()
+                    rel_cell[:, :, 0] *= features.shape[2]
+                    rel_cell[:, :, 1] *= features.shape[3]
+                    #print("Rel_cell: " + str(rel_cell.shape))
+                    fc_input = torch.cat([fc_input, rel_cell], dim=-1)
+
+                    #print("fc_input : " + str(fc_input.shape))
+                    pred = self.LIIF_forward(fc_input)                    
+                    preds.append(pred)
+                    
+                    area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])#.flatten()
+                    areas.append(area + 1e-9)
+                else:
+                    for vz in vz_lst:
+                        loc_ = locations.clone()
+                        loc_[:, :, :, 0] += vx * rx + eps_shift
+                        loc_[:, :, :, 1] += vy * ry + eps_shift
+                        loc_[:, :, :, 2] += vz * rz + eps_shift
+                        loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
+                        q_feat = F.grid_sample(
+                            features, loc_.flip(-1).unsqueeze(1),
+                            mode='nearest', align_corners=False)[:, :, 0, :] \
+                            .permute(0, 2, 1)
+                        q_coord = F.grid_sample(
+                            feat_coord, loc_.flip(-1).unsqueeze(1),
+                            mode='nearest', align_corners=False)[:, :, 0, :] \
+                            .permute(0, 2, 1)
+                        rel_coord = locations - q_coord
+                        rel_coord[:, :, 0] *= features.shape[-2]
+                        rel_coord[:, :, 1] *= features.shape[-1]
+                        inp = torch.cat([q_feat, rel_coord], dim=-1)
+
+                        if self.cell_decode:
+                            rel_cell = cell_sizes.clone()
+                            rel_cell[:, :, 0] *= features.shape[-2]
+                            rel_cell[:, :, 1] *= features.shape[-1]
+                            inp = torch.cat([inp, rel_cell], dim=-1)
+
+                        bs, q = locations.shape[:2]
+                        pred = self.imnet(inp.view(bs * q, -1)).view(bs, q, -1)
+                        preds.append(pred)
+
+                        area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])
+                        areas.append(area + 1e-9)
+
+        tot_area = torch.stack(areas).sum(dim=0)
+        if(self.opt['mode'] == "2D"):
+            t = areas[0]; areas[0] = areas[3]; areas[3] = t
+            t = areas[1]; areas[1] = areas[2]; areas[2] = t
+            ret = 0
+            
+            for pred, area in zip(preds, areas):  
+                ret = ret + pred * (area / tot_area).unsqueeze(-1)
+
+        return ret
+
 class LIIF_skip(nn.Module):
     def __init__(self, opt):
         super(LIIF_skip, self).__init__()
@@ -888,6 +1039,166 @@ class LIIF_skip_res(nn.Module):
 
         return ret
 
+class UltraSR(nn.Module):
+    def __init__(self, opt):
+        super(UltraSR, self).__init__()
+        self.opt = opt
+        n_dims = 2
+        self.pos_skip_size = n_dims
+        self.num_fourier_weights = 12
+        self.fourier_weights = torch.arange(1, self.num_fourier_weights+1, 1, 
+            dtype=torch.float32, device=opt['device'])
+        self.fourier_weights.requires_grad=True
+        latent_vector_size = opt['base_num_kernels']*(3**n_dims) + n_dims + n_dims*self.num_fourier_weights*2
+        if("skip" in opt['feat_model']):
+            latent_vector_size += 3**n_dims
+
+        self.UltraSR = nn.ModuleList([
+            nn.Linear(latent_vector_size, 256),
+            nn.Linear(256+n_dims*self.num_fourier_weights*2, 256),
+            nn.Linear(256+n_dims*self.num_fourier_weights*2, 256),
+            nn.Linear(256+n_dims*self.num_fourier_weights*2, 256),
+            nn.Linear(256, opt["num_channels"])
+        ])
+
+        self.apply(weights_init)
+
+    def UltraSR_forward(self, feats, rel_coord, rel_cell):
+
+        rel_coord = rel_coord.unsqueeze(-1)
+        rel_coord = rel_coord.repeat([1]*(len(rel_coord.shape)-1) + [self.num_fourier_weights])
+
+        sin_rel_coord = torch.sin(rel_coord*self.fourier_weights)
+        cos_rel_coord = torch.cos(rel_coord*self.fourier_weights)
+
+
+        x = torch.cat([feats, rel_cell,
+            sin_rel_coord.flatten(-2), cos_rel_coord.flatten(-2)], 
+            dim=-1)
+        for i in range(len(self.UltraSR)-1):
+            x = self.UltraSR[i](x)
+            x = F.relu(x)
+            if(i < len(self.UltraSR)-2):
+                x = torch.cat([x, sin_rel_coord.flatten(-2), cos_rel_coord.flatten(-2)], dim=-1)
+        x = self.UltraSR[-1](x)
+        return x
+
+    def forward(self, features, locations, cell_sizes):
+        lr_shape = features.shape
+        
+        if(self.opt['mode'] == "2D"):
+            features = F.pad(features, [1, 1, 1, 1], mode='reflect')
+            features = F.unfold(features, 3, padding=0)
+            features = features.view(
+                features.shape[0], features.shape[1], *lr_shape[2:])
+        else:
+            features = F.pad(features, [1, 1, 1, 1, 1, 1], mode='reflect')
+            features = F.unfold(features, 3, padding=0)
+            features = features.view(
+                features.shape[0], features.shape[1], *lr_shape[2:])
+
+        vx_lst = [-1, 1]
+        vy_lst = [-1, 1]
+        eps_shift = 1e-6
+        rx = (2 / features.shape[2]) / 2
+        ry = (2 / features.shape[3]) / 2
+        if(self.opt['mode']== "3D"):
+            rz = 2 / features.shape[4] / 2
+            vz_lst = [-1, 1]
+
+        feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
+            flatten=False)
+            
+        if(self.opt['mode'] == "2D"):
+            feat_coord = feat_coord.permute(2, 0, 1).\
+                unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
+        else:
+            feat_coord = feat_coord.permute(3, 0, 1, 2).\
+                unsqueeze(0).expand(features.shape[0], 3, *features.shape[2:])
+
+        preds = []
+        areas = []
+        
+        for vx in vx_lst:
+            for vy in vy_lst:
+                if(self.opt['mode'] == "2D"):
+                    loc_ = locations.clone()
+                    #print("Loc: " + str(loc_.shape))
+                    loc_[:, :, 0] += vx * rx + eps_shift
+                    loc_[:, :, 1] += vy * ry + eps_shift
+                    loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
+                    q_feat = F.grid_sample(
+                        features, loc_.flip(-1).unsqueeze(0).repeat(lr_shape[0], 
+                        *[1]*(len(lr_shape)-1)),
+                        mode='nearest', align_corners=False)[0]
+                        
+                    #print("Q feat: " + str(q_feat.shape))
+                    q_coord = F.grid_sample(
+                        feat_coord, loc_.flip(-1).unsqueeze(0).repeat(lr_shape[0], 
+                        *[1]*(len(lr_shape)-1)),
+                        mode='nearest', align_corners=False)[0]
+
+                    #print("Q coord: " + str(q_coord.shape))
+                    rel_coord = locations - q_coord.permute(1, 2, 0)
+
+                    rel_coord[:, :, 0] *= features.shape[2]
+                    rel_coord[:, :, 1] *= features.shape[3]
+                    
+                    rel_cell = cell_sizes.clone()
+                    rel_cell[:, :, 0] *= features.shape[2]
+                    rel_cell[:, :, 1] *= features.shape[3]
+
+                    #print("fc_input : " + str(fc_input.shape))
+                    pred = self.UltraSR_forward(q_feat.permute(1, 2, 0).contiguous(), rel_coord, rel_cell)                    
+                    preds.append(pred)
+                    
+                    area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])#.flatten()
+                    areas.append(area + 1e-9)
+                else:
+                    for vz in vz_lst:
+                        loc_ = locations.clone()
+                        loc_[:, :, :, 0] += vx * rx + eps_shift
+                        loc_[:, :, :, 1] += vy * ry + eps_shift
+                        loc_[:, :, :, 2] += vz * rz + eps_shift
+                        loc_.clamp_(-1 + 1e-6, 1 - 1e-6)
+                        q_feat = F.grid_sample(
+                            features, loc_.flip(-1).unsqueeze(1),
+                            mode='nearest', align_corners=False)[:, :, 0, :] \
+                            .permute(0, 2, 1)
+                        q_coord = F.grid_sample(
+                            feat_coord, loc_.flip(-1).unsqueeze(1),
+                            mode='nearest', align_corners=False)[:, :, 0, :] \
+                            .permute(0, 2, 1)
+                        rel_coord = locations - q_coord
+                        rel_coord[:, :, 0] *= features.shape[-2]
+                        rel_coord[:, :, 1] *= features.shape[-1]
+                        inp = torch.cat([q_feat, rel_coord], dim=-1)
+
+                        if self.cell_decode:
+                            rel_cell = cell_sizes.clone()
+                            rel_cell[:, :, 0] *= features.shape[-2]
+                            rel_cell[:, :, 1] *= features.shape[-1]
+                            inp = torch.cat([inp, rel_cell], dim=-1)
+
+                        bs, q = locations.shape[:2]
+                        pred = self.imnet(inp.view(bs * q, -1)).view(bs, q, -1)
+                        preds.append(pred)
+
+                        area = torch.abs(rel_coord[:, :, 0] * rel_coord[:, :, 1])
+                        areas.append(area + 1e-9)
+
+        tot_area = torch.stack(areas).sum(dim=0)
+        if(self.opt['mode'] == "2D"):
+            t = areas[0]; areas[0] = areas[3]; areas[3] = t
+            t = areas[1]; areas[1] = areas[2]; areas[2] = t
+            ret = 0
+            
+            for pred, area in zip(preds, areas):  
+                ret = ret + pred * (area / tot_area).unsqueeze(-1)
+
+        return ret
+
+
 class GenericModel(nn.Module):
     def __init__(self, opt):
         super(GenericModel, self).__init__()
@@ -907,10 +1218,14 @@ class GenericModel(nn.Module):
             self.upscaling_model = LIIF(opt)
         elif(self.opt['upscale_model'] == "LIIF_skip"):
             self.upscaling_model = LIIF_skip(opt)
+        elif(self.opt['upscale_model'] == "LIIF_skip_posonly"):
+            self.upscaling_model = LIIF_skip_posonly(opt)
         elif(self.opt['upscale_model'] == "LIIF_skip_res"):
             self.upscaling_model = LIIF_skip_res(opt)
         elif(self.opt['upscale_model'] == "MFFN"):
             self.upscaling_model = MFFN(opt)
+        elif(self.opt['upscale_model'] == "UltraSR"):
+            self.upscaling_model = UltraSR(opt)
         
     def forward(self, lr, locations, cell_sizes):
         features = self.feature_extractor(lr)
