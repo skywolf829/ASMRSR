@@ -179,3 +179,66 @@ class LocalDataset(torch.utils.data.Dataset):
                     data = torch.flip(data,[3])
 
         return data
+
+class LocalTemporalDataset(torch.utils.data.Dataset):
+    def __init__(self, opt):
+        
+        self.opt = opt
+        self.channel_mins = []
+        self.channel_maxs = []
+        self.max_mag = None
+        self.num_items = 0
+        self.items = []
+        self.item_names = []
+        extension = ""
+        print("Initializing dataset")
+        for filename in os.listdir(self.opt['data_folder']):
+            self.item_names.append(filename.split(".")[0])
+            extension = filename.split(".")[1]
+            self.num_items += 1
+
+        self.item_names.sort(key=int)
+        for i in range(len(self.item_names)):
+            filename = self.item_names[i] + "." + extension
+            ts = h5py.File(os.path.join(self.opt['data_folder'], filename), 'r')
+            data =  torch.tensor(ts['data'], dtype=torch.float32)
+            ts.close()
+            self.items.append(data)
+            print(filename)
+        
+        print("Finished dataset init")
+        self.num_items -= opt['time_cropping_resolution']
+        self.num_items += 1
+
+    def __len__(self):
+        return self.num_items
+
+    def __getitem__(self, index):
+        
+        x_start = 0
+        x_end = self.opt['x_resolution']
+        y_start = 0
+        y_end = self.opt['y_resolution']
+
+        x_start = torch.randint(self.opt['x_resolution'] - \
+            self.opt['cropping_resolution'], [1]).item()
+        x_end = x_start + self.opt['cropping_resolution']
+
+        y_start = torch.randint(self.opt['y_resolution'] - \
+            self.opt['cropping_resolution'], [1]).item()
+        y_end = y_start + self.opt['cropping_resolution']
+
+        items = []
+        for i in range(index, index+self.opt['time_cropping_resolution']):
+            items.append(self.items[i][:,x_start:x_end,y_start:y_end].unsqueeze(0))
+        
+        item = torch.cat(items, dim=0)
+
+        if(self.opt['random_flipping']):
+            if(torch.rand(1).item() > 0.5):
+                item = torch.flip(item,[2])
+            if(torch.rand(1).item() > 0.5):
+                item = torch.flip(item,[3])
+
+        # switch t c w h to c w h t
+        return item.permute(1, 2, 3, 0)

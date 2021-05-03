@@ -66,7 +66,7 @@ class ResidueBlock(nn.Module):
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
             batchnorm_layer = nn.BatchNorm2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
             batchnorm_layer = nn.BatchNorm3d
         self.block = nn.Sequential(
@@ -93,7 +93,7 @@ class DenseBlock(nn.Module):
         super(DenseBlock, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
         self.c1 = conv_layer(kernels, growth_channel, kernel_size=opt['kernel_size'],
         stride=opt['stride'],padding=opt['padding'])
@@ -139,7 +139,7 @@ class ESRGAN_Generator(nn.Module):
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
             self.pix_shuffle = nn.PixelShuffle(2)
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
 
         self.c1 = conv_layer(opt['num_channels'], opt['base_num_kernels'],
@@ -210,7 +210,7 @@ class SinGAN_Discriminator(nn.Module):
         if(opt['mode'] == "2D" or opt['mode'] == "3Dto2D"):
             conv_layer = nn.Conv2d
             batchnorm_layer = nn.BatchNorm2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
             batchnorm_layer = nn.BatchNorm3d
 
@@ -264,7 +264,7 @@ class RDB(nn.Module):
         super(RDB, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
 
         self.block = nn.Sequential(
@@ -282,7 +282,7 @@ class RRDN(nn.Module):
         super(RRDN, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
 
         self.first_conv = conv_layer(opt['num_channels'], opt['base_num_kernels'],
@@ -307,7 +307,7 @@ class RDN(nn.Module):
         super(RDN, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
 
         self.first_conv = conv_layer(opt['num_channels'], opt['base_num_kernels'], kernel_size=opt['kernel_size'], padding=1)
@@ -328,7 +328,7 @@ class RDN_skip(nn.Module):
         super(RDN_skip, self).__init__()
         if(opt['mode'] == "2D"):
             conv_layer = nn.Conv2d
-        elif(opt['mode'] == "3D"):
+        else:
             conv_layer = nn.Conv3d
 
         self.first_conv = conv_layer(opt['num_channels'], opt['base_num_kernels'], kernel_size=opt['kernel_size'], padding=1)
@@ -1198,6 +1198,42 @@ class UltraSR(nn.Module):
 
         return ret
 
+class MFFN_temporal(nn.Module):
+    def __init__(self, opt):
+        super(MFFN_temporal, self).__init__()
+        self.opt = opt
+        num_input = 32 + 3
+        self.MFFN = nn.ModuleList([
+            nn.Linear(num_input, 512),
+            nn.SiLU(),
+            nn.Linear(num_input+512, 256),
+            nn.SiLU(),
+            nn.Linear(num_input+256, 128),
+            nn.SiLU(),
+            nn.Linear(num_input+128, 64),
+            nn.SiLU(),
+            nn.Linear(num_input+64, 32),
+            nn.SiLU(),
+            nn.Linear(32, opt['num_channels'])
+        ])
+        
+        self.apply(weights_init)
+
+    def forward(self, features, locations, cell_sizes=None):
+        lr_shape = features.shape
+        
+        context_vectors = F.grid_sample(features, locations.flip(-1).unsqueeze(0), 
+            'bilinear', align_corners=False)
+        context_vectors = torch.cat([context_vectors, 
+            locations.flip(-1).permute(3, 0, 1, 2).unsqueeze(0)], dim=1)
+        context_vectors = context_vectors.permute(0, 2, 3, 4, 1).contiguous()
+        x = self.MFFN[1](self.MFFN[0](context_vectors))
+        x = self.MFFN[3](self.MFFN[2](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[5](self.MFFN[4](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[7](self.MFFN[6](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[9](self.MFFN[8](torch.cat([x, context_vectors], dim=-1)))
+        x = self.MFFN[10](x)
+        return x[0]
 
 class GenericModel(nn.Module):
     def __init__(self, opt):
@@ -1226,6 +1262,8 @@ class GenericModel(nn.Module):
             self.upscaling_model = MFFN(opt)
         elif(self.opt['upscale_model'] == "UltraSR"):
             self.upscaling_model = UltraSR(opt)
+        elif(self.opt['upscale_model'] == "MFFN_temporal"):
+            self.upscaling_model = MFFN_temporal(opt)
         
     def forward(self, lr, locations, cell_sizes):
         features = self.feature_extractor(lr)

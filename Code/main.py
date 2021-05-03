@@ -1,8 +1,8 @@
 from utility_functions import str2bool
 from options import *
-from datasets import LocalDataset
+from datasets import LocalDataset, LocalTemporalDataset
 from models import GenericModel, load_model
-from train import Trainer
+from train import TemporalTrainer, Trainer
 import argparse
 import os
 
@@ -36,7 +36,7 @@ if __name__ == '__main__':
     parser.add_argument('--scale_factor_start',default=None, type=float,help='Where to start in-dist training')
     parser.add_argument('--scale_factor_end',default=None, type=float,help='Where to stop in-dist training') 
     parser.add_argument('--cropping_resolution',default=None, type=int,help='Cropping resolution') 
-
+    parser.add_argument('--time_cropping_resolution',default=None, type=int, help="Crop time")
 
     parser.add_argument('--x_resolution',default=None, type=int,help='x')    
     parser.add_argument('--y_resolution',default=None, type=int,help='y')
@@ -95,7 +95,10 @@ if __name__ == '__main__':
         for k in args.keys():
             if args[k] is not None:
                 opt[k] = args[k]
-        dataset = LocalDataset(opt)
+        if "TV" in opt['mode']:
+            dataset = LocalTemporalDataset(opt)
+        else:
+            dataset = LocalDataset(opt)
         model = GenericModel(opt)
 
     else:        
@@ -106,7 +109,12 @@ if __name__ == '__main__':
             if args[k] is not None:
                 opt[k] = args[k]
         model = load_model(opt,args["device"])
-        dataset = LocalDataset(opt)
-
-    trainer = Trainer(opt)
+        if "TV" in opt['mode']:
+            dataset = LocalTemporalDataset(opt)
+        else:
+            dataset = LocalDataset(opt)
+    if "TV" in opt['mode']:
+        trainer = TemporalTrainer(opt)
+    else:
+        trainer = Trainer(opt)
     trainer.train(model, dataset)

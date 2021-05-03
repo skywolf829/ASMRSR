@@ -5,7 +5,7 @@ class Options():
     def get_default():
         opt = {}
         # Input info
-        opt["mode"]                    = "2D"      # What SinGAN to use - 2D or 3D
+        opt["mode"]                    = "2D"      # What SinGAN to use - 2D, 2DTV, or 3D
         opt["feat_model"]              = "RDN"      # What SinGAN to use - 2D or 3D
         opt["upscale_model"]           = "LIIF"      # What SinGAN to use - 2D or 3D
         opt['residual_weighing']       = False
@@ -19,6 +19,7 @@ class Options():
         opt["spatial_downscale_ratio"] = 0.5       # Spatial downscale ratio between levels
         opt["min_dimension_size"]      = 16        # Smallest a dimension can go to upscale from
         opt["cropping_resolution"]     = 48
+        opt["time_cropping_resolution"] = 48
         opt["train_date_time"]         = None      # The day/time the model was trained (finish time)
         
         opt['dataset_name']            = "isotropic1024coarse"
@@ -26,6 +27,7 @@ class Options():
         opt['x_resolution']            = 1024
         opt['y_resolution']            = 1024
         opt['z_resolution']            = 1
+        opt['t_resolution']            = 400
         opt['ts_skip']                 = 10
         opt['num_dims']                = 3
         opt['random_flipping']         = True
