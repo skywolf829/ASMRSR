@@ -273,55 +273,26 @@ class TemporalTrainer():
             for batch_num, real_hr in enumerate(dataloader):
                 model.zero_grad()
                 real_hr = real_hr.to(self.opt['device'])
-                if(rank == 0):
-                    hr_im = torch.from_numpy(np.transpose(to_img(real_hr, self.opt['mode']), 
-                        [2, 0, 1])[0:3]).unsqueeze(0)
                 real_shape = real_hr.shape
-                #print(real_hr.dtype)
-                #print("Full shape : " + str(real_hr.shape))
+                
                 
                 scale_factor = torch.rand([1], device=real_hr.device, dtype=real_hr.dtype) * \
                     (self.opt['scale_factor_end'] - self.opt['scale_factor_start']) + \
                     self.opt['scale_factor_start']
                 
-                #scale_factor = 1
-                #print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
                     mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
                     align_corners=False, recompute_scale_factor=False)
-                if(rank == 0):
-                    lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
-                        [2, 0, 1])[0:3]).unsqueeze(0)
-                    lr_im = F.interpolate(lr_im, size=hr_im.shape[2:], mode='nearest')
-                #print("LR shape : " + str(real_lr.shape))
-
-                #lr_upscaled = model(real_lr, list(real_hr.shape[2:]))
+                
                 hr_coords, real_hr = to_pixel_samples(real_hr, flatten=False)
                 cell_sizes = torch.ones_like(hr_coords)
-                #print("Cell sizes : " + str(cell_sizes.shape))
+                
                 for i in range(cell_sizes.shape[-1]):
                     cell_sizes[:,:,i] *= 2 / real_shape[2+i]
                 
                 lr_upscaled = model(real_lr, hr_coords, cell_sizes)
-                if(self.opt['mode'] == "2D"):
-                    lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
-                else:                    
-                    lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
-                if(rank == 0):
-                    sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
-                        self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
-
-                if(self.opt['residual_weighing']):
-                    lr_interp = F.grid_sample(real_lr, hr_coords.flip(-1).unsqueeze(0), 
-                        mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
-                        align_corners=False)
-                    
-                    rel_coord = make_residual_weight_grid(real_lr, hr_coords, self.opt['mode'])
-                    #print(rel_coord)
-                    lr_interp *= (1-rel_coord)
-                    lr_upscaled *= rel_coord
-                    lr_upscaled += lr_interp.detach()
-
+                lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                
                 L1 = L1loss(torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0), real_hr)
                 L1.backward()
                 model_optim.step()
