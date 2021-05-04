@@ -1202,7 +1202,7 @@ class MFFN_temporal(nn.Module):
     def __init__(self, opt):
         super(MFFN_temporal, self).__init__()
         self.opt = opt
-        num_input = 32 + 3
+        num_input = opt['base_num_kernels'] + 3
         self.MFFN = nn.ModuleList([
             nn.Linear(num_input, 512),
             nn.SiLU(),
