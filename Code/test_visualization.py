@@ -515,3 +515,34 @@ if __name__ == '__main__':
                     ims.append(im)
             imageio.mimwrite(os.path.join(output_folder, "ResidualWeights.gif"), ims)
             imageio.mimwrite(os.path.join(output_folder, "ResidualWeights.mp4"), ims)
+
+        if(args['sensitivity_test']):
+            rand_dataset_item = random.randint(0, len(dataset)-1)
+            hr = dataset[rand_dataset_item].unsqueeze(0).to(args['device'])
+            real_shape = hr.shape
+            hr_im = torch.from_numpy(np.transpose(to_img(hr, args['mode']), 
+                            [2, 0, 1])[0:3]).unsqueeze(0)
+            size = []
+            for i in range(2, len(hr.shape)):
+                size.append(int(hr.shape[i]*(1/args['max_sf'])))
+            lr = F.interpolate(hr, size=size, 
+                    mode='bilinear' if opt['mode'] == "2D" else "trilinear",
+                    align_corners=False, recompute_scale_factor=False)
+
+            if(model.upscaling_model.continuous):
+                hr_coords, real_hr = to_pixel_samples(hr, flatten=False)
+                cell_sizes = torch.ones_like(hr_coords)
+
+                for i in range(cell_sizes.shape[-1]):
+                    cell_sizes[:,:,i] *= 2 / real_shape[2+i]
+                
+                lr_upscaled = model(lr, hr_coords, cell_sizes)
+                if(opt['mode'] == "2D"):
+                    lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
+                else:                    
+                    lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
+            else:
+                lr_upscaled = model(lr)
+            
+            

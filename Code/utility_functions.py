@@ -295,11 +295,12 @@ def ssim3D(img1, img2, window_size = 11, size_average = True):
     
     return _ssim_3D(img1, img2, window, window_size, channel, size_average)
 
-def to_img(input : torch.Tensor, mode : str, colormap = True):
+def to_img(input : torch.Tensor, mode : str, colormap = True, normalize=True):
     if(mode == "2D"):
         img = input[0].clone().detach()
-        img -= img.min()
-        img *= (1/img.max()+1e-6)
+        if(normalize):
+            img -= img.min()
+            img *= (1/img.max()+1e-6)
         if(colormap and img.shape[0] == 1):
             img = cm.coolwarm(img[0].cpu().numpy())
             #img = np.transpose(img, (2, 0, 1))
@@ -309,8 +310,9 @@ def to_img(input : torch.Tensor, mode : str, colormap = True):
             img = img.permute(1, 2, 0).cpu().numpy().astype(np.uint8)
     elif(mode == "3D"):
         img = input[0,:,:,:,int(input.shape[4]/2)].clone()
-        img -= img.min()        
-        img *= (1/img.max()+1e-6)
+        if(normalize):
+            img -= img.min()        
+            img *= (1/img.max()+1e-6)
         if(colormap and img.shape[0] == 1):
             img = cm.coolwarm(img[0].cpu().numpy())
             #img = np.transpose(img, (2, 0, 1))

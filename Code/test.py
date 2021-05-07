@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     use_bilin = args['bilinear']
 
-    scale_factor_to_test = np.arange(1, 33)
+    scale_factor_to_test = np.arange(4, 5)
     psnrs = []
     ssims = []
     with torch.no_grad():
@@ -54,29 +54,32 @@ if __name__ == '__main__':
 
                 size = []
                 for i in range(2, len(hr.shape)):
-                    size.append(int(hr.shape[i]*(1/scale_factor)))
+                    size.append(round(hr.shape[i]*(1/scale_factor)))
                 lr = F.interpolate(hr, size=size, 
                         mode='bilinear' if opt['mode'] == "2D" else "trilinear",
                         align_corners=False, recompute_scale_factor=False)
 
                 if(not use_bilin):
-                    coords = make_coord(hr.shape[2:], args['device'], flatten=False)
-                    cell_sizes = torch.ones_like(coords)
+                    if(model.upscaling_model.continuous):
+                        coords = make_coord(hr.shape[2:], args['device'], flatten=False)
+                        cell_sizes = torch.ones_like(coords)
 
-                    for i in range(cell_sizes.shape[-1]):
-                        cell_sizes[:,:,i] *= 2 / size[i]
-                    
-                    lr_upscaled = model(lr, coords, cell_sizes)
-                    if(args['mode'] == "2D"):
-                        lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
-                    else:                    
-                        lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                        for i in range(cell_sizes.shape[-1]):
+                            cell_sizes[:,:,i] *= 2 / size[i]
+                        
+                        lr_upscaled = model(lr, coords, cell_sizes)
+                        if(args['mode'] == "2D"):
+                            lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
+                        else:                    
+                            lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                        lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
+                    else:
+                        lr_upscaled = model(lr)
                 else:
                     lr_upscaled = F.interpolate(lr, size=hr.shape[2:],
                         align_corners=False, mode="bilinear" if args['mode'] == "2D" else "trilinear")
+                #lr_upscaled = F.interpolate(lr_upscaled, size=real_shape[2:], mode="bilinear", align_corners=False)
                 p = PSNR(lr_upscaled, hr)
-                #if(args['mode'] == "2D"):
-                #    s = ssim()
                 psnrs_this_scale.append(p.item())
             psnrs.append(np.array(psnrs_this_scale).mean())
             print("Scale factor x%i, PSNR (dB): %0.02f" % (scale_factor, psnrs[-1]))

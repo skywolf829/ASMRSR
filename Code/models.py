@@ -1,9 +1,10 @@
+from matplotlib.pyplot import xcorr
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules import conv
 from torch.nn.modules.activation import SiLU
-from utility_functions import VoxelShuffle, create_batchnorm_layer, create_conv_layer, weights_init, make_coord
+from utility_functions import  create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
 from options import save_options
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
@@ -395,6 +396,7 @@ class UNet(nn.Module):
 class MFFN(nn.Module):
     def __init__(self, opt):
         super(MFFN, self).__init__()
+        self.continuous = True
         self.opt = opt
         num_input = 32
         if(self.opt['mode'] == "2D"):
@@ -440,6 +442,7 @@ class MFFN(nn.Module):
 class LIIF(nn.Module):
     def __init__(self, opt):
         super(LIIF, self).__init__()
+        self.continuous = True
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
@@ -588,6 +591,7 @@ class LIIF(nn.Module):
 class LIIF_skip_posonly(nn.Module):
     def __init__(self, opt):
         super(LIIF_skip_posonly, self).__init__()
+        self.continuous = True
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
@@ -739,6 +743,7 @@ class LIIF_skip_posonly(nn.Module):
 class LIIF_skip(nn.Module):
     def __init__(self, opt):
         super(LIIF_skip, self).__init__()
+        self.continuous = True
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
@@ -889,6 +894,7 @@ class LIIF_skip(nn.Module):
 class LIIF_skip_res(nn.Module):
     def __init__(self, opt):
         super(LIIF_skip_res, self).__init__()
+        self.continuous = True
         self.opt = opt
         n_dims = 2
         latent_vector_size = opt['base_num_kernels']*(3**n_dims)+n_dims+n_dims
@@ -1042,6 +1048,7 @@ class LIIF_skip_res(nn.Module):
 class UltraSR(nn.Module):
     def __init__(self, opt):
         super(UltraSR, self).__init__()
+        self.continuous = True
         self.opt = opt
         n_dims = 2
         self.pos_skip_size = n_dims
@@ -1201,6 +1208,7 @@ class UltraSR(nn.Module):
 class MFFN_temporal(nn.Module):
     def __init__(self, opt):
         super(MFFN_temporal, self).__init__()
+        self.continuous = True
         self.opt = opt
         num_input = opt['base_num_kernels'] + 3
         self.MFFN = nn.ModuleList([
@@ -1235,11 +1243,57 @@ class MFFN_temporal(nn.Module):
         x = self.MFFN[10](x)
         return x[0]
 
+class Shuffle(nn.Module):
+    def __init__(self, opt):
+        super(Shuffle, self).__init__()
+        self.continuous = False
+        self.opt = opt
+        if(opt['mode'] == "2D"):
+            conv_layer = nn.Conv2d
+        else:
+            conv_layer = nn.Conv3d
+        n_dims = 2 if opt['mode'] == "2D" else 3
+
+        self.first_conv = conv_layer(opt['base_num_kernels'], 
+            opt['base_num_kernels']*(round(1/opt['spatial_downscale_ratio'])**n_dims),
+            kernel_size=opt['kernel_size'], padding=1)
+        self.second_conv = conv_layer(opt['base_num_kernels'], opt['base_num_kernels'],
+        stride=opt['stride'],padding=opt['padding'],kernel_size=opt['kernel_size'])
+
+        self.final_conv = conv_layer(opt['base_num_kernels'], opt['num_channels'],
+        stride=opt['stride'],padding=2,kernel_size=5)
+
+    def forward(self, x, *kwargs):
+        b = x.shape[0]
+        x = self.first_conv(x)
+        sf = round(1/self.opt['spatial_downscale_ratio'])
+        n_dims = 2 if self.opt['mode'] == "2D" else 3
+        fact = sf**n_dims
+        if(self.opt['mode'] == "2D"):
+            x = x.contiguous().view(
+                b, sf, sf, int(x.shape[1]/fact), x.shape[2], x.shape[3]
+            )
+            x = x.permute(0, 3, 4, 1, 5, 2).contiguous()
+            x = x.view(
+                b, int(x.shape[1]), sf*x.shape[2], sf*x.shape[4]
+            )            
+        else:
+            x = x.contiguous().view(
+                b, sf, sf, sf, int(x.shape[1]/fact), x.shape[2], x.shape[3], x.shape[4]
+            )
+            x = x.permute(0, 4, 5, 1, 6, 2, 7, 3).contiguous()
+            x = x.view(
+                b, int(x.shape[1]/fact), sf*x.shape[2], sf*x.shape[4], sf*x.shape[6]
+            )
+        x = self.second_conv(x)
+        x = F.leaky_relu(x, 0.2)
+        x = self.final_conv(x)
+        return x
+
 class GenericModel(nn.Module):
     def __init__(self, opt):
         super(GenericModel, self).__init__()
         self.opt = opt
-        n_dims = 2 if self.opt['mode'] == '3D' else 3
 
         if(self.opt['feat_model'] == "RDN"):
             self.feature_extractor = RDN(opt)
@@ -1264,8 +1318,10 @@ class GenericModel(nn.Module):
             self.upscaling_model = UltraSR(opt)
         elif(self.opt['upscale_model'] == "MFFN_temporal"):
             self.upscaling_model = MFFN_temporal(opt)
+        elif(self.opt['upscale_model'] == "Shuffle"):
+            self.upscaling_model = Shuffle(opt)
         
-    def forward(self, lr, locations, cell_sizes):
+    def forward(self, lr, locations=None, cell_sizes=None):
         features = self.feature_extractor(lr)
         points = self.upscaling_model(features, locations, cell_sizes)
         return points
