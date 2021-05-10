@@ -40,7 +40,7 @@ if __name__ == '__main__':
 
     use_bilin = args['bilinear']
 
-    scale_factor_to_test = np.arange(4, 5)
+    scale_factor_to_test = np.arange(1, 5)
     psnrs = []
     ssims = []
     with torch.no_grad():
@@ -72,13 +72,14 @@ if __name__ == '__main__':
                             lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                         else:                    
                             lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
-                        lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
+                        #lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
                     else:
                         lr_upscaled = model(lr)
                 else:
                     lr_upscaled = F.interpolate(lr, size=hr.shape[2:],
                         align_corners=False, mode="bilinear" if args['mode'] == "2D" else "trilinear")
-                #lr_upscaled = F.interpolate(lr_upscaled, size=real_shape[2:], mode="bilinear", align_corners=False)
+                
+                lr_upscaled = F.interpolate(lr_upscaled, size=real_shape[2:], mode="bilinear", align_corners=False)
                 p = PSNR(lr_upscaled, hr)
                 psnrs_this_scale.append(p.item())
             psnrs.append(np.array(psnrs_this_scale).mean())

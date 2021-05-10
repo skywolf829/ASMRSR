@@ -7,6 +7,8 @@ from torch.nn.modules.activation import SiLU
 from utility_functions import  create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
 from options import save_options
+from einops.layers.torch import Rearrange
+
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
 
@@ -392,6 +394,14 @@ class UNet(nn.Module):
         y0 = torch.cat([y0, x0], dim=1)
 
         return y0
+
+class Identity(nn.Module):
+    def __init__ (self,opt):
+        super(Identity, self).__init__()
+        self.opt = opt
+
+    def forward(self, x):
+        return x
 
 class MFFN(nn.Module):
     def __init__(self, opt):
@@ -1290,6 +1300,67 @@ class Shuffle(nn.Module):
         x = self.final_conv(x)
         return x
 
+class FeedForward(nn.Module):
+    def __init__(self, dim, hidden_dim, dropout = 0.0):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, dim),
+            nn.Dropout(dropout)
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class MixerBlock(nn.Module):
+
+    def __init__(self, dim, num_patch, token_dim, channel_dim, dropout = 0.0):
+        super().__init__()
+
+        self.token_mix = nn.Sequential(
+            nn.LayerNorm(dim),
+            Rearrange('b n d -> b d n'),
+            FeedForward(num_patch, token_dim, dropout),
+            Rearrange('b d n -> b n d')
+        )
+
+        self.channel_mix = nn.Sequential(
+            nn.LayerNorm(dim),
+            FeedForward(dim, channel_dim, dropout),
+        )
+
+    def forward(self, x):
+        x = x + self.token_mix(x)
+        x = x + self.channel_mix(x)
+        return x
+
+
+class MLPMixer(nn.Module):
+    def __init__(self, in_channels, dim, num_classes, patch_size, image_size, depth, token_dim, channel_dim):
+        super().__init__()
+        assert image_size % patch_size == 0, 'Image dimensions must be divisible by the patch size.'
+        self.num_patch =  (image_size// patch_size) ** 2
+        self.to_patch_embedding = nn.Sequential(
+            nn.Conv2d(in_channels, dim, patch_size, patch_size),
+            Rearrange('b c h w -> b (h w) c'),
+        )
+        self.mixer_blocks = nn.ModuleList([])
+        for _ in range(depth):
+            self.mixer_blocks.append(MixerBlock(dim, self.num_patch, token_dim, channel_dim))
+        self.layer_norm = nn.LayerNorm(dim)
+        self.mlp_head = nn.Sequential(
+            nn.Linear(dim, num_classes)
+        )
+
+    def forward(self, x):
+        x = self.to_patch_embedding(x)
+        for mixer_block in self.mixer_blocks:
+            x = mixer_block(x)
+        x = self.layer_norm(x)
+        x = x.mean(dim=1)
+        return self.mlp_head(x)
+
 class GenericModel(nn.Module):
     def __init__(self, opt):
         super(GenericModel, self).__init__()
@@ -1303,6 +1374,8 @@ class GenericModel(nn.Module):
             self.feature_extractor = RRDN(opt)
         elif(self.opt['feat_model'] == "UNet"):
             self.feature_extractor = UNet(opt)
+        elif(self.opt['feat_model'] == "Identity"):
+            self.feature_extractor = Identity(opt)
         
         if(self.opt['upscale_model'] == "LIIF"):
             self.upscaling_model = LIIF(opt)

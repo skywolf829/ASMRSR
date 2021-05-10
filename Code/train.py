@@ -171,17 +171,18 @@ class Trainer():
                     for i in range(cell_sizes.shape[-1]):
                         cell_sizes[:,:,i] *= 2 / real_shape[2+i]
                     
-                    lr_upscaled = model(real_lr, hr_coords, cell_sizes)
+                    lr_upscaled = model(real_lr, hr_coords, cell_sizes)                    
                     if(self.opt['mode'] == "2D"):
                         lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                     else:                    
                         lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
+                    sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
+                            self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
                     lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
                 else:
-                    lr_upscaled = model(real_lr)
-                    
-                sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
-                        self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
+                    lr_upscaled = model(real_lr)                    
+                    sr_im = torch.from_numpy(np.transpose(to_img(lr_upscaled, 
+                            self.opt['mode']),[2, 0, 1])[0:3]).unsqueeze(0)
 
                 L1 = L1loss(lr_upscaled, real_hr)
                 L1.backward()
