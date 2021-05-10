@@ -54,7 +54,7 @@ if __name__ == '__main__':
 
                 size = []
                 for i in range(2, len(hr.shape)):
-                    size.append(round(hr.shape[i]*(1/scale_factor)))
+                    size.append(int(round(hr.shape[i]*(1/scale_factor))))
                 lr = F.interpolate(hr, size=size, 
                         mode='bilinear' if opt['mode'] == "2D" else "trilinear",
                         align_corners=False, recompute_scale_factor=False)
