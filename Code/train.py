@@ -227,6 +227,75 @@ class Trainer():
             print("Training on " + self.opt['device'])
             self.train_single(model, dataset)
          
+class ImplicitNetworkTrainer():
+    def __init__(self, opt):
+        self.opt = opt
+
+    def train_single(self, model, dataset):
+        model = model.to(self.opt['device'])    
+        model_optim = optim.Adam(model.parameters(), lr=self.opt["g_lr"], 
+            betas=(self.opt["beta_1"],self.opt["beta_2"]))
+        
+        optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
+            milestones=[200, 400, 600, 800],gamma=self.opt['gamma'])
+
+        writer = SummaryWriter(os.path.join('tensorboard',self.opt['save_name']))
+
+        start_time = time.time()
+
+        dataloader = torch.utils.data.DataLoader(
+            dataset=dataset,
+            shuffle=True,
+            num_workers=self.opt["num_workers"],
+            pin_memory=True
+        )
+        L1loss = nn.L1Loss().to(self.opt["device"])
+        step = 0
+        for epoch in range(self.opt['epoch_number'], self.opt['epochs']):
+            self.opt["epoch_number"] = epoch
+            for batch_num, raw_data in enumerate(dataloader):
+                model.zero_grad()
+                raw_data = raw_data.to(self.opt['device'])
+
+                sample_coords, _ = to_pixel_samples(raw_data, flatten=False)
+                recovered_data = model(sample_coords)
+
+                L1 = L1loss(recovered_data, raw_data)
+                L1.backward()
+                model_optim.step()
+                optim_scheduler.step()
+                psnr = PSNR(lr_upscaled, real_hr)
+                
+                if(step % self.opt['save_every'] == 0):
+                    print("Epoch %i batch %i, sf: x%0.02f, L1: %0.04f, PSNR (dB): %0.02f" % \
+                        (epoch, batch_num, scale_factor, L1.item(), psnr.item()))
+                    writer.add_scalar('L1', L1.item(), step)
+                    writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
+                step += 1
+            
+            if(epoch % self.opt['save_every'] == 0):
+                save_model(model, self.opt)
+                print("Saved model")
+
+        end_time = time.time()
+        total_time = start_time - end_time
+        print("Time to train: " + str(total_time))
+        save_model(model, self.opt)
+        print("Saved model")
+
+    def train(self, model, dataset):
+        torch.manual_seed(0b10101010101010101010101010101010)
+        if(self.opt['train_distributed']):
+            print("Training distributed across " + str(self.opt['gpus_per_node']) + " GPUs")
+            os.environ['MASTER_ADDR'] = '127.0.0.1'              
+            os.environ['MASTER_PORT'] = '29500' 
+            mp.spawn(self.train_distributed,
+                args=(model,self.opt,dataset),
+                nprocs=self.opt['gpus_per_node'],
+                join=True)
+        else:
+            print("Training on " + self.opt['device'])
+            self.train_single(model, dataset)
 
 class TemporalTrainer():
     def __init__(self, opt):
