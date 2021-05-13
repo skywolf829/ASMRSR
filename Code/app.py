@@ -14,6 +14,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import imageio
+from torchvision.utils import make_grid
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 template_folder = os.path.join(file_folder_path, 'SR_Sensitivity', 
@@ -28,25 +29,37 @@ global dataset
 global hr
 global pixel_target
 global model_name
+global cropping_resolution
+global continuous_scale_factor
+global feature_maps
 
 model_name = "isomag2D_RDN5_64_Shuffle4"
 SR_model = None
 dataset = None
 hr = None
+cropping_resolution = 48
+continuous_scale_factor = 3.00
 pixel_target = [0.0, 0.0]
+feature_maps = None
 
 def load_model_and_dataset():
-    
-    model = load_current_model()
-    opt = model.opt
+    global continuous_scale_factor    
+    global SR_model
+    SR_model = load_current_model()
+    opt = SR_model.opt
     if "TV" in opt['mode']:
         dataset = LocalTemporalDataset(opt)
     else:
         dataset = LocalDataset(opt)
-    return model, dataset
+    if not SR_model.upscaling_model.continuous:
+        continuous_scale_factor = round(1/opt['spatial_downscale_ratio'])
+    return SR_model, dataset
 
 def load_current_model():
     global model_name
+    global SR_model
+    global cropping_resolution
+    global continuous_scale_factor  
 
     file_folder_path = os.path.dirname(os.path.abspath(__file__))
     project_folder_path = os.path.join(file_folder_path, "..")
@@ -55,9 +68,12 @@ def load_current_model():
     opt = load_options(os.path.join(save_folder, model_name))
     opt["device"] = "cuda:0"
     opt["save_name"] = model_name   
-    opt['cropping_resolution'] = 120
-    model = load_model(opt,"cuda:0")
-    return model
+    opt['cropping_resolution'] = cropping_resolution
+    SR_model = load_model(opt,"cuda:0")
+    SR_model = SR_model.to("cuda:0")
+    if not SR_model.upscaling_model.continuous:
+        continuous_scale_factor = round(1/opt['spatial_downscale_ratio'])
+    return SR_model
 
 def log_visitor():
     visitor_ip = request.remote_addr
@@ -96,27 +112,35 @@ def perform_SR():
     global SR_model
     global dataset
     global hr
+    global continuous_scale_factor
     if SR_model is None:
         SR_model, dataset = load_model_and_dataset()
     if hr is None:
         _ = get_random_item()
+    print(hr.shape)
     hr_im = to_img(hr/hr.max(), SR_model.opt['mode'], normalize=False)
-
+    hr = hr.to(SR_model.opt['device'])
     real_shape = hr.shape
     size = []
+    sf_to_use = continuous_scale_factor if SR_model.upscaling_model.continuous \
+        else (1/SR_model.opt['spatial_downscale_ratio'])
     for i in range(2, len(hr.shape)):
-        size.append(round(hr.shape[i]*SR_model.opt['spatial_downscale_ratio']))
-
+        size.append(round(hr.shape[i]/sf_to_use))
+        
     lr = F.interpolate(hr, size=size, 
             mode='bilinear' if SR_model.opt['mode'] == "2D" else "trilinear",
             align_corners=False, recompute_scale_factor=False)
     lr_up = F.interpolate(lr, size=hr.shape[2:], mode='nearest')
     lr_im = to_img(lr_up/hr.max(), SR_model.opt['mode'], normalize=False)
 
-    if(SR_model.upscaling_model.continuous):
-        hr_coords, hr = to_pixel_samples(hr, flatten=False)
-        cell_sizes = torch.ones_like(hr_coords)
+    print(hr.device)
+    print(lr.device)
 
+    if(SR_model.upscaling_model.continuous):
+        hr_coords, _ = to_pixel_samples(hr, flatten=False)
+        cell_sizes = torch.ones_like(hr_coords, device=hr_coords.device)
+        print(hr_coords.device)
+        print(cell_sizes.device)
         for i in range(cell_sizes.shape[-1]):
             cell_sizes[:,:,i] *= 2 / real_shape[2+i]
         
@@ -125,7 +149,7 @@ def perform_SR():
             lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
         else:                    
             lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
-        lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
+        #lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
     else:
         lr_upscaled = SR_model(lr)
         
@@ -155,16 +179,19 @@ def sensetivity_adjustment():
     global dataset
     global hr
     global pixel_target
+    global feature_maps
     if SR_model is None:
         SR_model, dataset = load_model_and_dataset()
     if hr is None:
         _ = get_random_item()
     change = float(request.args.get('change'))
-    
+    hr = hr.to(SR_model.opt['device'])
     real_shape = hr.shape
     size = []
+    sf_to_use = continuous_scale_factor if SR_model.upscaling_model.continuous \
+        else (1/SR_model.opt['spatial_downscale_ratio'])
     for i in range(2, len(hr.shape)):
-        size.append(round(hr.shape[i]*SR_model.opt['spatial_downscale_ratio']))
+        size.append(round(hr.shape[i]/sf_to_use))
 
     lr = F.interpolate(hr, size=size, 
             mode='bilinear' if SR_model.opt['mode'] == "2D" else "trilinear",
@@ -179,19 +206,21 @@ def sensetivity_adjustment():
 
     lr.requires_grad = True
     if(SR_model.upscaling_model.continuous):
-        hr_coords, hr = to_pixel_samples(hr, flatten=False)
+        hr_coords, _ = to_pixel_samples(hr, flatten=False)
         cell_sizes = torch.ones_like(hr_coords)
 
         for i in range(cell_sizes.shape[-1]):
             cell_sizes[:,:,i] *= 2 / real_shape[2+i]
         
+        feature_maps = SR_model.feature_extractor(lr.clone().detach()).clone().detach()
         lr_upscaled = SR_model(lr, hr_coords, cell_sizes)
         if(SR_model.opt['mode'] == "2D"):
             lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
         else:                    
             lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
-        lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
+        #lr_upscaled = torch.flatten(lr_upscaled,start_dim=1, end_dim=-1).permute(1,0)
     else:
+        feature_maps = SR_model.feature_extractor(lr.clone().detach()).clone().detach()
         lr_upscaled = SR_model(lr)
     
     changed_sr_im = to_img(lr_upscaled/hr.max(), SR_model.opt['mode'], normalize=False)
@@ -221,7 +250,22 @@ def sensetivity_adjustment():
                 "sensitivity_img":str(base64.b64encode(sense_img))
             }
         )
-    
+
+@app.route('/update_feature_maps')
+def update_feature_maps():
+    global feature_maps
+    fm = feature_maps.permute(1, 0, 2, 3)
+    img = 255*make_grid(fm, nrow=10, normalize=True).permute(1, 2, 0).cpu().numpy()
+    success, return_img = cv2.imencode(".png", cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+    return_img = return_img.tobytes()
+    return jsonify(
+        {
+            "img":str(base64.b64encode(return_img)),
+            "min": "%0.03f" % feature_maps.min().cpu().item(),            
+            "max": "%0.03f" % feature_maps.max().cpu().item()
+        }
+    )
+
 @app.route('/get_available_models')
 def get_available_models():
     file_folder_path = os.path.dirname(os.path.abspath(__file__))
@@ -240,6 +284,25 @@ def load_new_model():
     SR_model = load_current_model()
     return jsonify({"success": True})
     
+@app.route('/change_crop')
+def change_crop():
+    global cropping_resolution
+    global SR_model
+    global dataset
+    cropping_resolution = int(request.args.get('cropping_resolution'))
+    SR_model.opt['cropping_resolution'] = cropping_resolution
+    dataset.opt['cropping_resolution'] = cropping_resolution
+    return jsonify({"success": True})
+    
+@app.route('/change_scale_factor')
+def change_scale_factor():
+    global SR_model
+    global dataset
+    global continuous_scale_factor
+    continuous_scale_factor = round(float(request.args.get('scale_factor')))
+    return jsonify({"success": True})
+    
+
 
 if __name__ == '__main__':
     

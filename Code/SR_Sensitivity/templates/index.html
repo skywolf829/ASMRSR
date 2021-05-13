@@ -52,31 +52,32 @@
           });
         }
         function perform_SR(){
-        $.ajax({
-            url: "/perform_SR",
-            type: "get",
-            success: function(response){
+            $.ajax({
+                url: "/perform_SR",
+                type: "get",
+                success: function(response){
 
-                var sr_img = response['sr_img']
-                sr_img = sr_img.substring(2, sr_img.length-1)
-                
-                var gt_img = response['gt_img']
-                gt_img = gt_img.substring(2, gt_img.length-1)
+                    var sr_img = response['sr_img']
+                    sr_img = sr_img.substring(2, sr_img.length-1)
+                    
+                    var gt_img = response['gt_img']
+                    gt_img = gt_img.substring(2, gt_img.length-1)
 
-                var lr_img = response['lr_img']
-                lr_img = lr_img.substring(2, lr_img.length-1)
+                    var lr_img = response['lr_img']
+                    lr_img = lr_img.substring(2, lr_img.length-1)
 
-                
-                document.getElementById('GT_img').src = "data:img/png;base64,"+gt_img; 
-                document.getElementById('SR_img').src = "data:img/png;base64,"+sr_img; 
-                document.getElementById('LR_img').src = "data:img/png;base64,"+lr_img; 
+                    
+                    document.getElementById('GT_img').src = "data:img/png;base64,"+gt_img; 
+                    document.getElementById('SR_img').src = "data:img/png;base64,"+sr_img; 
+                    document.getElementById('LR_img').src = "data:img/png;base64,"+lr_img; 
 
-                document.getElementById('psnr').innerHTML = "PSNR: " + response['psnr'] + " dB";
-                document.getElementById('l1').innerHTML = "L1: " + response['l1'];
-                
-                sensetivity_adjustment();
-            } 
-        });
+                    document.getElementById('psnr').innerHTML = "PSNR: " + response['psnr'] + " dB";
+                    document.getElementById('l1').innerHTML = "L1: " + response['l1'];
+                    
+                    sensetivity_adjustment();
+                    update_feature_maps();
+                } 
+            });
         }
 
         function sensetivity_adjustment(){
@@ -104,6 +105,24 @@
             });
         }
 
+        function update_feature_maps(){
+            $.ajax({
+                url: "/update_feature_maps",
+                type: "get",
+                success: function(response){
+                    var feature_maps = response['img']
+                    feature_maps = feature_maps.substring(2, feature_maps.length-1)
+
+                    document.getElementById('feature_maps').src = "data:img/png;base64,"+feature_maps; 
+
+                    
+                    var fm_min = response['min']
+                    var fm_max = response['max']
+                    document.getElementById('fm_minmax').innerHTML = "[" + fm_min + ", " + fm_max + "]";
+                } 
+            });
+        }
+
         function load_new_model(item){
             model_name = item.innerHTML;
 
@@ -121,8 +140,39 @@
 
         function onstart(){
             perform_SR();
-            sensetivity_adjustment();
             get_available_models();
+        }
+        function updateSRratio(val) {
+          document.getElementById('SRratiolabel').innerHTML="SR ratio: " + val; 
+        }
+        function updateCroppingResolution(val){
+            document.getElementById('cropsizelabel').innerHTML="Crop size: " + val;
+        }
+
+        function change_scale_factor(val) {
+            $.ajax({
+                url: "/change_scale_factor",
+                data: {
+                    scale_factor: document.getElementById("SRratio").value
+                },
+                type: "get",
+                success: function(response){
+                    console.log("Loaded changed scale factor");
+                } 
+            });
+             
+        }
+        function change_crop(val){
+            $.ajax({
+                url: "/change_crop",
+                data: {
+                    cropping_resolution: document.getElementById("croppingres").value
+                },
+                type: "get",
+                success: function(response){
+                    console.log("Loaded changed crop size");
+                } 
+            });
         }
     </script>
 </head>
@@ -181,7 +231,24 @@
                         <button onclick="get_random_item()">New item</button>
                         <button onclick="perform_SR()">Perform SR</button>
                         <br>
+                        <label for="SRratio" id="SRratiolabel" class="form-label">SR ratio: 3</label>
+                        <input type="range" class="form-range" id="SRratio" 
+                        min="1" max="4" step="1" value="3"
+                        onchange="updateSRratio(this.value)"
+                        onmouseup="change_scale_factor()" 
+                        ontouchend="change_scale_factor()">
+                        
+                        <br>
+                        <label for="croppingres" id="cropsizelabel" class="form-label">Crop size: 48</label>
+                        <input type="range" class="form-range" id="croppingres" 
+                        min="24" max="1024" step="24" value="48" 
+                        onchange="updateCroppingResolution(this.value)"
+                        onmouseup="change_crop()" 
+                        ontouchend="change_crop()">
+                        <br>
                         <p><a id="psnr">PSNR: --</a>,<a id="l1"> L1: --</a></p>
+                        <br>                        
+                        <p>Feature map min/max: <br><a id="fm_minmax">[--,--]</a></p>
                         <br>
                     </div>
                     <div class="col-md-3">
@@ -212,20 +279,12 @@
                     </div>
                 </div>
                 <br>
-                <br>
                 <div class="row">
-                    <div class="col-md-3">
-                        
-                    </div>
-                    <div class="col-md-3">
-                        <label for="valuechange" class="form-label">Value change</label>
-                        <input type="range" class="form-range" id="valuechange" 
-                        min="-1" max="1" step="0.05"
-                        onmouseup="sensetivity_adjustment()" 
-                        ontouchend="sensetivity_adjustment()">
-                    </div>
-                    <div class="col-md-3">
-
+                    <div class="col-md-9">
+                        Feature maps
+                        <img id='feature_maps' 
+                        class="img-fluid" alt=""
+                        style="width:100%;height:100%;">
                     </div>
                 </div>
                 <br>
@@ -247,6 +306,22 @@
                         <img id='changed_SR_img' 
                         class="img-fluid" alt=""
                         style="width:100%;height:100%;">
+                    </div>
+                </div>
+                <br>
+                <div class="row">
+                    <div class="col-md-3">
+                        
+                    </div>
+                    <div class="col-md-3">
+                        <label for="valuechange" class="form-label">Value change</label>
+                        <input type="range" class="form-range" id="valuechange" 
+                        min="-1" max="1" step="0.05"
+                        onmouseup="sensetivity_adjustment()" 
+                        ontouchend="sensetivity_adjustment()">
+                    </div>
+                    <div class="col-md-3">
+
                     </div>
                 </div>
                 <br>

@@ -1335,7 +1335,6 @@ class MixerBlock(nn.Module):
         x = x + self.channel_mix(x)
         return x
 
-
 class MLPMixer(nn.Module):
     def __init__(self, in_channels, dim, num_classes, patch_size, image_size, depth, token_dim, channel_dim):
         super().__init__()
