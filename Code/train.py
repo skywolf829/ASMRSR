@@ -124,8 +124,14 @@ class Trainer():
     def train_single(self, model, dataset):
         model = model.to(self.opt['device'])
 
-        model_optim = optim.Adam(model.parameters(), lr=self.opt["g_lr"], 
-            betas=(self.opt["beta_1"],self.opt["beta_2"]))
+        if not self.opt['fine_tuning']:
+            model_optim = optim.Adam(model.parameters(), lr=self.opt["g_lr"], 
+               betas=(self.opt["beta_1"],self.opt["beta_2"]))
+        else:
+            for param in model.feature_extractor.parameters():
+                param.requires_grad = False
+            model_optim = optim.Adam(model.upscaling_model.parameters(), lr=self.opt["g_lr"], 
+               betas=(self.opt["beta_1"],self.opt["beta_2"]))
         optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
             milestones=[200, 400, 600, 800],gamma=self.opt['gamma'])
 
