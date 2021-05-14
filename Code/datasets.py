@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import torch
 import h5py
 import torch.nn.functional as F
-from utility_functions import AvgPool2D, AvgPool3D
+from utility_functions import AvgPool2D, AvgPool3D, make_coord
 
 class LocalDataset(torch.utils.data.Dataset):
     def __init__(self, opt):
@@ -179,6 +179,30 @@ class LocalDataset(torch.utils.data.Dataset):
                     data = torch.flip(data,[3])
 
         return data
+
+
+class LocalImplicitDataset(torch.utils.data.Dataset):
+    def __init__(self, opt):        
+        self.opt = opt
+        
+        print("Initializing dataset")
+        for filename in os.listdir(self.opt['data_folder']):
+            self.item = h5py.File(os.path.join(self.opt['data_folder'], filename), 'r')
+        self.item = torch.tensor(self.item).unsqueeze(0)
+        self.coords = make_coord(self.item.shape, "cpu")        
+
+        self.item = self.item[0].flatten(1).transpose(0,1).contiguous()
+        self.coords = self.coords[0].flatten(1).transpose(0,1).contiguous()
+
+        self.num_items = self.item.shape[0]
+        print("Dataset initialized")
+
+    def __len__(self):
+        return self.num_items
+
+    def __getitem__(self, index):
+        return (self.coords[index], self.item[index])
+
 
 class LocalTemporalDataset(torch.utils.data.Dataset):
     def __init__(self, opt):

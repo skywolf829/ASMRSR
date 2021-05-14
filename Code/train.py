@@ -253,24 +253,22 @@ class ImplicitNetworkTrainer():
         step = 0
         for epoch in range(self.opt['epoch_number'], self.opt['epochs']):
             self.opt["epoch_number"] = epoch
-            for batch_num, raw_data in enumerate(dataloader):
+            for batch_num, inout in enumerate(dataloader):
                 model.zero_grad()
-                raw_data = raw_data.to(self.opt['device'])
+                in_coords, out_vals = inout
 
-                sample_coords, _ = to_pixel_samples(raw_data, flatten=False)
-                recovered_data = model(sample_coords)
+                recovered_data = model(in_coords)
 
-                L1 = L1loss(recovered_data, raw_data)
+                L1 = L1loss(recovered_data, out_vals)
                 L1.backward()
                 model_optim.step()
                 optim_scheduler.step()
-                psnr = PSNR(lr_upscaled, real_hr)
+                psnr = PSNR(recovered_data, out_vals)
                 
                 if(step % self.opt['save_every'] == 0):
-                    print("Epoch %i batch %i, sf: x%0.02f, L1: %0.04f, PSNR (dB): %0.02f" % \
-                        (epoch, batch_num, scale_factor, L1.item(), psnr.item()))
+                    print("Epoch %i batch %i, sf: L1: %0.04f, PSNR (dB): %0.02f" % \
+                        (epoch, batch_num, L1.item(), psnr.item()))
                     writer.add_scalar('L1', L1.item(), step)
-                    writer.add_images("LR, SR, HR", torch.cat([lr_im, sr_im, hr_im]), global_step=step)
                 step += 1
             
             if(epoch % self.opt['save_every'] == 0):

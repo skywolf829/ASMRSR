@@ -17,17 +17,17 @@ if __name__ == '__main__':
     opt = Options.get_default()
     model = GenericModel(opt)
 
-    m1_opt = load_options(os.path.join(save_folder, "isomag2D_RDB5_64_Shuffle1"))
+    m1_opt = load_options(os.path.join(save_folder, "isomag2D_RDN5_64_Shuffle1"))
     m2_opt = load_options(os.path.join(save_folder, "isomag2D_RDB5_64_LIIFskip"))
 
     m1 = load_model(m1_opt,"cuda:0")
-    m2 = loda_model(m2_opt,"cuda:0")
-`   
+    m2 = load_model(m2_opt,"cuda:0")
+   
     model.feature_extractor = m1.feature_extractor
-    model.upscaling_model = m2.upscale_model
+    model.upscaling_model = m2.upscaling_model
     
-    opt['upscale_model'] = "LIIF"
-    opt['save_name'] = "RDB5_LIIF_finetune"
+    opt['upscale_model'] = "LIIF_skip"
+    opt['save_name'] = "RDN5_LIIF_finetune1thru4"
 
     save_model(model, opt)
-    `    
+    

@@ -1,8 +1,8 @@
 from utility_functions import str2bool
 from options import *
-from datasets import LocalDataset, LocalTemporalDataset
+from datasets import LocalDataset, LocalImplicitDataset, LocalTemporalDataset
 from models import GenericModel, load_model
-from train import TemporalTrainer, Trainer
+from train import ImplicitNetworkTrainer, TemporalTrainer, Trainer
 import argparse
 import os
 
@@ -98,6 +98,8 @@ if __name__ == '__main__':
                 opt[k] = args[k]
         if "TV" in opt['mode']:
             dataset = LocalTemporalDataset(opt)
+        elif "implicit" in opt['mode']:
+            dataset = LocalImplicitDataset(opt)
         else:
             dataset = LocalDataset(opt)
         model = GenericModel(opt)
@@ -112,10 +114,14 @@ if __name__ == '__main__':
         model = load_model(opt,args["device"])
         if "TV" in opt['mode']:
             dataset = LocalTemporalDataset(opt)
+        elif "implicit" in opt['mode']:
+            dataset = LocalImplicitDataset(opt)
         else:
             dataset = LocalDataset(opt)
     if "TV" in opt['mode']:
         trainer = TemporalTrainer(opt)
+    elif "implicit" in opt['mode']:
+        trainer = ImplicitNetworkTrainer(opt)
     else:
         trainer = Trainer(opt)
     trainer.train(model, dataset)
