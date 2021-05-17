@@ -70,7 +70,7 @@ class Trainer():
                 #scale_factor = 1
                 #print("Scale factor: " + str(scale_factor))
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
-                    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+                    mode = "bilinear" if "2D" in self.opt['mode'] else "trilinear",
                     align_corners=False, recompute_scale_factor=False)
                 if(rank == 0):
                     lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
@@ -85,7 +85,7 @@ class Trainer():
                         cell_sizes[:,:,i] *= 2 / real_shape[2+i]
                     
                     lr_upscaled = model(real_lr, hr_coords, cell_sizes)
-                    if(self.opt['mode'] == "2D"):
+                    if("2D" in self.opt['mode']):
                         lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                     else:                    
                         lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
@@ -164,7 +164,7 @@ class Trainer():
                     scale_factor = (1/self.opt['spatial_downscale_ratio'])
 
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
-                    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+                    mode = "bilinear" if "2D" in self.opt['mode'] else "trilinear",
                     align_corners=False, recompute_scale_factor=False)
                 lr_im = torch.from_numpy(np.transpose(to_img(real_lr, self.opt['mode']), 
                         [2, 0, 1])[0:3]).unsqueeze(0)
@@ -178,7 +178,7 @@ class Trainer():
                         cell_sizes[:,:,i] *= 2 / real_shape[2+i]
                     
                     lr_upscaled = model(real_lr, hr_coords, cell_sizes)                    
-                    if(self.opt['mode'] == "2D"):
+                    if("2D" in self.opt['mode']):
                         lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                     else:                    
                         lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
@@ -247,7 +247,8 @@ class ImplicitNetworkTrainer():
             dataset=dataset,
             shuffle=True,
             num_workers=self.opt["num_workers"],
-            pin_memory=True
+            pin_memory=True,
+            batch_size=self.opt['minibatch']
         )
         L1loss = nn.L1Loss().to(self.opt["device"])
         step = 0
@@ -256,6 +257,9 @@ class ImplicitNetworkTrainer():
             for batch_num, inout in enumerate(dataloader):
                 model.zero_grad()
                 in_coords, out_vals = inout
+
+                in_coords = in_coords.to(self.opt['device'])                
+                out_vals = out_vals.to(self.opt['device'])
 
                 recovered_data = model(in_coords)
 
@@ -344,7 +348,7 @@ class TemporalTrainer():
                     self.opt['scale_factor_start']
                 
                 real_lr = F.interpolate(real_hr, scale_factor=(1/scale_factor),
-                    mode = "bilinear" if self.opt['mode'] == "2D" else "trilinear",
+                    mode = "bilinear" if "2D" in self.opt['mode'] else "trilinear",
                     align_corners=False, recompute_scale_factor=False)
                 
                 hr_coords, real_hr = to_pixel_samples(real_hr, flatten=False)

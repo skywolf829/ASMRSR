@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules import conv
-from torch.nn.modules.activation import SiLU
+from torch.nn.modules.activation import LeakyReLU, SiLU
 from utility_functions import  create_batchnorm_layer, create_conv_layer, weights_init, make_coord
 import os
 from options import save_options
@@ -66,7 +66,7 @@ def load_model(opt, device):
 class ResidueBlock(nn.Module):
     def __init__(self, channels_in, channels_out, opt):
         super(ResidueBlock, self).__init__()
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
             batchnorm_layer = nn.BatchNorm2d
         else:
@@ -94,7 +94,7 @@ class ResidueBlock(nn.Module):
 class DenseBlock(nn.Module):
     def __init__(self, kernels, growth_channel, opt):
         super(DenseBlock, self).__init__()
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
         else:
             conv_layer = nn.Conv3d
@@ -139,7 +139,7 @@ class ESRGAN_Generator(nn.Module):
         super(ESRGAN_Generator, self).__init__()
         self.opt = opt
 
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
             self.pix_shuffle = nn.PixelShuffle(2)
         else:
@@ -156,9 +156,9 @@ class ESRGAN_Generator(nn.Module):
         stride=opt['stride'],padding=opt['padding'],kernel_size=opt['kernel_size'])
 
         # Upscaling happens between 2 and 3
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             fact = 4
-        elif(self.opt['mode'] == "3D"):
+        else:
             fact = 8
         if(self.opt['upsample_mode'] == "shuffle"):
             self.c2_vs = conv_layer(opt['base_num_kernels'], opt['base_num_kernels']*fact,
@@ -185,10 +185,10 @@ class ESRGAN_Generator(nn.Module):
             mode=self.opt['upsample_mode'], align_corners=True)
         elif(self.opt['upsample_mode'] == "shuffle"):
             out = self.c2_vs(out)
-            if(self.opt['mode'] == "3D"):
+            if("2D" in self.opt['mode']):
+                out = self.pix_shuffle(out)            
+            else:
                 out = VoxelShuffle(out)
-            elif(self.opt['mode'] == "2D"):
-                out = self.pix_shuffle(out)
         
         out = self.lrelu(self.c3(out))
         out = self.final_conv(out)
@@ -210,7 +210,7 @@ class SinGAN_Discriminator(nn.Module):
         super(SinGAN_Discriminator, self).__init__()
 
         use_sn = opt['regularization'] == "SN"
-        if(opt['mode'] == "2D" or opt['mode'] == "3Dto2D"):
+        if("2D" in opt['mode'] or opt['mode'] == "3Dto2D"):
             conv_layer = nn.Conv2d
             batchnorm_layer = nn.BatchNorm2d
         else:
@@ -265,7 +265,7 @@ class SinGAN_Discriminator(nn.Module):
 class RDB(nn.Module):
     def __init__ (self,in_c,out_c,opt):
         super(RDB, self).__init__()
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
         else:
             conv_layer = nn.Conv3d
@@ -283,7 +283,7 @@ class RDB(nn.Module):
 class RRDN(nn.Module):
     def __init__ (self,opt):
         super(RRDN, self).__init__()
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
         else:
             conv_layer = nn.Conv3d
@@ -308,7 +308,7 @@ class RRDN(nn.Module):
 class RDN(nn.Module):
     def __init__ (self,opt):
         super(RDN, self).__init__()
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
         else:
             conv_layer = nn.Conv3d
@@ -329,7 +329,7 @@ class RDN(nn.Module):
 class RDN_skip(nn.Module):
     def __init__ (self,opt):
         super(RDN_skip, self).__init__()
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
         else:
             conv_layer = nn.Conv3d
@@ -368,7 +368,7 @@ class UNet(nn.Module):
                 ResidueBlock(64, 16, opt)
             ]
         )
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             self.maxpool = nn.MaxPool2d(2, stride=2)
         else:
             self.maxpool = nn.MaxPool3d(2, stride=2)
@@ -409,7 +409,7 @@ class MFFN(nn.Module):
         self.continuous = True
         self.opt = opt
         num_input = 32
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             num_input += 2
         else:
             num_input += 3
@@ -433,11 +433,11 @@ class MFFN(nn.Module):
         lr_shape = features.shape
         
         context_vectors = F.grid_sample(features, locations.flip(-1).unsqueeze(0), 
-            mode='bilinear' if self.opt['mode'] == "2D" else 'trilinear',
+            mode='bilinear' if "2D" in self.opt['mode'] else 'trilinear',
             align_corners=False)
         context_vectors = torch.cat([context_vectors, 
             locations.flip(-1).permute(2, 0, 1).unsqueeze(0)], dim=1)
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             context_vectors = context_vectors.permute(0, 2, 3, 1).contiguous()
         else:
             context_vectors = context_vectors.permute(0, 2, 3, 4, 1).contiguous()
@@ -480,7 +480,7 @@ class LIIF(nn.Module):
     def forward(self, features, locations, cell_sizes):
         lr_shape = features.shape
         
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
             features = F.unfold(features, 3, padding=0)
             features = features.view(
@@ -503,7 +503,7 @@ class LIIF(nn.Module):
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
             
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             feat_coord = feat_coord.permute(2, 0, 1).\
                 unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
         else:
@@ -515,7 +515,7 @@ class LIIF(nn.Module):
         
         for vx in vx_lst:
             for vy in vy_lst:
-                if(self.opt['mode'] == "2D"):
+                if("2D" in self.opt['mode']):
                     loc_ = locations.clone()
                     #print("Loc: " + str(loc_.shape))
                     loc_[:, :, 0] += vx * rx + eps_shift
@@ -588,7 +588,7 @@ class LIIF(nn.Module):
                         areas.append(area + 1e-9)
 
         tot_area = torch.stack(areas).sum(dim=0)
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             t = areas[0]; areas[0] = areas[3]; areas[3] = t
             t = areas[1]; areas[1] = areas[2]; areas[2] = t
             ret = 0
@@ -632,7 +632,7 @@ class LIIF_skip_posonly(nn.Module):
     def forward(self, features, locations, cell_sizes):
         lr_shape = features.shape
         
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
             features = F.unfold(features, 3, padding=0)
             features = features.view(
@@ -655,7 +655,7 @@ class LIIF_skip_posonly(nn.Module):
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
             
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             feat_coord = feat_coord.permute(2, 0, 1).\
                 unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
         else:
@@ -667,7 +667,7 @@ class LIIF_skip_posonly(nn.Module):
         
         for vx in vx_lst:
             for vy in vy_lst:
-                if(self.opt['mode'] == "2D"):
+                if("2D" in self.opt['mode']):
                     loc_ = locations.clone()
                     #print("Loc: " + str(loc_.shape))
                     loc_[:, :, 0] += vx * rx + eps_shift
@@ -740,7 +740,7 @@ class LIIF_skip_posonly(nn.Module):
                         areas.append(area + 1e-9)
 
         tot_area = torch.stack(areas).sum(dim=0)
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             t = areas[0]; areas[0] = areas[3]; areas[3] = t
             t = areas[1]; areas[1] = areas[2]; areas[2] = t
             ret = 0
@@ -783,7 +783,7 @@ class LIIF_skip(nn.Module):
     def forward(self, features, locations, cell_sizes):
         lr_shape = features.shape
         
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
             features = F.unfold(features, 3, padding=0)
             features = features.view(
@@ -806,7 +806,7 @@ class LIIF_skip(nn.Module):
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
             
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             feat_coord = feat_coord.permute(2, 0, 1).\
                 unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
         else:
@@ -818,7 +818,7 @@ class LIIF_skip(nn.Module):
         
         for vx in vx_lst:
             for vy in vy_lst:
-                if(self.opt['mode'] == "2D"):
+                if("2D" in self.opt['mode']):
                     loc_ = locations.clone()
                     #print("Loc: " + str(loc_.shape))
                     loc_[:, :, 0] += vx * rx + eps_shift
@@ -891,7 +891,7 @@ class LIIF_skip(nn.Module):
                         areas.append(area + 1e-9)
 
         tot_area = torch.stack(areas).sum(dim=0)
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             t = areas[0]; areas[0] = areas[3]; areas[3] = t
             t = areas[1]; areas[1] = areas[2]; areas[2] = t
             ret = 0
@@ -937,7 +937,7 @@ class LIIF_skip_res(nn.Module):
     def forward(self, features, locations, cell_sizes):
         lr_shape = features.shape
         
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
             features = F.unfold(features, 3, padding=0)
             features = features.view(
@@ -960,7 +960,7 @@ class LIIF_skip_res(nn.Module):
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
             
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             feat_coord = feat_coord.permute(2, 0, 1).\
                 unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
         else:
@@ -972,7 +972,7 @@ class LIIF_skip_res(nn.Module):
         
         for vx in vx_lst:
             for vy in vy_lst:
-                if(self.opt['mode'] == "2D"):
+                if("2D" in self.opt['mode']):
                     loc_ = locations.clone()
                     #print("Loc: " + str(loc_.shape))
                     loc_[:, :, 0] += vx * rx + eps_shift
@@ -1045,7 +1045,7 @@ class LIIF_skip_res(nn.Module):
                         areas.append(area + 1e-9)
 
         tot_area = torch.stack(areas).sum(dim=0)
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             t = areas[0]; areas[0] = areas[3]; areas[3] = t
             t = areas[1]; areas[1] = areas[2]; areas[2] = t
             ret = 0
@@ -1103,7 +1103,7 @@ class UltraSR(nn.Module):
     def forward(self, features, locations, cell_sizes):
         lr_shape = features.shape
         
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             features = F.pad(features, [1, 1, 1, 1], mode='reflect')
             features = F.unfold(features, 3, padding=0)
             features = features.view(
@@ -1126,7 +1126,7 @@ class UltraSR(nn.Module):
         feat_coord = make_coord(features.shape[2:], device=self.opt['device'],
             flatten=False)
             
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             feat_coord = feat_coord.permute(2, 0, 1).\
                 unsqueeze(0).expand(features.shape[0], 2, *features.shape[2:])
         else:
@@ -1138,7 +1138,7 @@ class UltraSR(nn.Module):
         
         for vx in vx_lst:
             for vy in vy_lst:
-                if(self.opt['mode'] == "2D"):
+                if("2D" in self.opt['mode']):
                     loc_ = locations.clone()
                     #print("Loc: " + str(loc_.shape))
                     loc_[:, :, 0] += vx * rx + eps_shift
@@ -1205,7 +1205,7 @@ class UltraSR(nn.Module):
                         areas.append(area + 1e-9)
 
         tot_area = torch.stack(areas).sum(dim=0)
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             t = areas[0]; areas[0] = areas[3]; areas[3] = t
             t = areas[1]; areas[1] = areas[2]; areas[2] = t
             ret = 0
@@ -1258,11 +1258,11 @@ class Shuffle(nn.Module):
         super(Shuffle, self).__init__()
         self.continuous = False
         self.opt = opt
-        if(opt['mode'] == "2D"):
+        if("2D" in opt['mode']):
             conv_layer = nn.Conv2d
         else:
             conv_layer = nn.Conv3d
-        n_dims = 2 if opt['mode'] == "2D" else 3
+        n_dims = 2 if "2D" in opt['mode'] else 3
 
         self.first_conv = conv_layer(opt['base_num_kernels'], 
             opt['base_num_kernels']*(round(1/opt['spatial_downscale_ratio'])**n_dims),
@@ -1277,9 +1277,9 @@ class Shuffle(nn.Module):
         b = x.shape[0]
         x = self.first_conv(x)
         sf = round(1/self.opt['spatial_downscale_ratio'])
-        n_dims = 2 if self.opt['mode'] == "2D" else 3
+        n_dims = 2 if "2D" in self.opt['mode'] else 3
         fact = sf**n_dims
-        if(self.opt['mode'] == "2D"):
+        if("2D" in self.opt['mode']):
             x = x.contiguous().view(
                 b, sf, sf, int(x.shape[1]/fact), x.shape[2], x.shape[3]
             )
@@ -1360,40 +1360,68 @@ class MLPMixer(nn.Module):
         x = x.mean(dim=1)
         return self.mlp_head(x)
 
+class ImplicitMLP(nn.Module):
+    def __init__(self, opt):
+        super(ImplicitMLP, self).__init__()        
+        self.opt = opt
+        
+        nodes_per_layer = 128
+        self.n_dims = 2 if "2D" in opt['mode'] else 3
+        self.model = nn.ModuleList([
+            nn.Linear(self.n_dims, nodes_per_layer),
+            nn.LeakyReLU(0.2),
+            nn.Linear(nodes_per_layer, nodes_per_layer),
+            nn.LeakyReLU(0.2),
+            nn.Linear(nodes_per_layer, nodes_per_layer),
+            nn.LeakyReLU(0.2),
+            nn.Linear(nodes_per_layer, opt["num_channels"])
+        ])
+        self.model = nn.Sequential(*self.model)
+        self.apply(weights_init)
+
+    def forward(self, locations):
+        return self.model(locations)
+
 class GenericModel(nn.Module):
     def __init__(self, opt):
         super(GenericModel, self).__init__()
         self.opt = opt
-
-        if(self.opt['feat_model'] == "RDN"):
-            self.feature_extractor = RDN(opt)
-        elif(self.opt['feat_model'] == "RDN_skip"):
-            self.feature_extractor = RDN_skip(opt)
-        elif(self.opt['feat_model'] == "RRDN"):
-            self.feature_extractor = RRDN(opt)
-        elif(self.opt['feat_model'] == "UNet"):
-            self.feature_extractor = UNet(opt)
-        elif(self.opt['feat_model'] == "Identity"):
-            self.feature_extractor = Identity(opt)
-        
-        if(self.opt['upscale_model'] == "LIIF"):
-            self.upscaling_model = LIIF(opt)
-        elif(self.opt['upscale_model'] == "LIIF_skip"):
-            self.upscaling_model = LIIF_skip(opt)
-        elif(self.opt['upscale_model'] == "LIIF_skip_posonly"):
-            self.upscaling_model = LIIF_skip_posonly(opt)
-        elif(self.opt['upscale_model'] == "LIIF_skip_res"):
-            self.upscaling_model = LIIF_skip_res(opt)
-        elif(self.opt['upscale_model'] == "MFFN"):
-            self.upscaling_model = MFFN(opt)
-        elif(self.opt['upscale_model'] == "UltraSR"):
-            self.upscaling_model = UltraSR(opt)
-        elif(self.opt['upscale_model'] == "MFFN_temporal"):
-            self.upscaling_model = MFFN_temporal(opt)
-        elif(self.opt['upscale_model'] == "Shuffle"):
-            self.upscaling_model = Shuffle(opt)
+        print(opt['mode'])
+        if("implicit" in self.opt['mode']):
+            self.model = ImplicitMLP(opt)
+        else:
+            if(self.opt['feat_model'] == "RDN"):
+                self.feature_extractor = RDN(opt)
+            elif(self.opt['feat_model'] == "RDN_skip"):
+                self.feature_extractor = RDN_skip(opt)
+            elif(self.opt['feat_model'] == "RRDN"):
+                self.feature_extractor = RRDN(opt)
+            elif(self.opt['feat_model'] == "UNet"):
+                self.feature_extractor = UNet(opt)
+            elif(self.opt['feat_model'] == "Identity"):
+                self.feature_extractor = Identity(opt)
+            
+            if(self.opt['upscale_model'] == "LIIF"):
+                self.upscaling_model = LIIF(opt)
+            elif(self.opt['upscale_model'] == "LIIF_skip"):
+                self.upscaling_model = LIIF_skip(opt)
+            elif(self.opt['upscale_model'] == "LIIF_skip_posonly"):
+                self.upscaling_model = LIIF_skip_posonly(opt)
+            elif(self.opt['upscale_model'] == "LIIF_skip_res"):
+                self.upscaling_model = LIIF_skip_res(opt)
+            elif(self.opt['upscale_model'] == "MFFN"):
+                self.upscaling_model = MFFN(opt)
+            elif(self.opt['upscale_model'] == "UltraSR"):
+                self.upscaling_model = UltraSR(opt)
+            elif(self.opt['upscale_model'] == "MFFN_temporal"):
+                self.upscaling_model = MFFN_temporal(opt)
+            elif(self.opt['upscale_model'] == "Shuffle"):
+                self.upscaling_model = Shuffle(opt)
         
     def forward(self, lr, locations=None, cell_sizes=None):
-        features = self.feature_extractor(lr)
-        points = self.upscaling_model(features, locations, cell_sizes)
+        if("implicit" in self.opt['mode']):
+            points = self.model(lr)
+        else:
+            features = self.feature_extractor(lr)
+            points = self.upscaling_model(features, locations, cell_sizes)
         return points

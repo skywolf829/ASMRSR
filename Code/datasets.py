@@ -188,12 +188,12 @@ class LocalImplicitDataset(torch.utils.data.Dataset):
         print("Initializing dataset")
         for filename in os.listdir(self.opt['data_folder']):
             self.item = h5py.File(os.path.join(self.opt['data_folder'], filename), 'r')
-        self.item = torch.tensor(self.item).unsqueeze(0)
-        self.coords = make_coord(self.item.shape, "cpu")        
+        self.item = torch.tensor(self.item['data'], device=opt['device'])
+        self.coords = make_coord(self.item.shape[1:], opt['device'], flatten=False)        
 
-        self.item = self.item[0].flatten(1).transpose(0,1).contiguous()
-        self.coords = self.coords[0].flatten(1).transpose(0,1).contiguous()
-
+        self.item = self.item.flatten(1).transpose(0,1).contiguous()
+        self.coords = self.coords.flatten(0, 1).contiguous().flip(-1)
+        
         self.num_items = self.item.shape[0]
         print("Dataset initialized")
 
