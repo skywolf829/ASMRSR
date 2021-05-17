@@ -81,7 +81,7 @@ if __name__ == '__main__':
                                 cell_sizes[:,:,i] *= 2 / size[i]
                             
                             lr_upscaled = model(lr, coords, cell_sizes)
-                            if(args['mode'] == "2D"):
+                            if("2D" in opt['mode']):
                                 lr_upscaled = lr_upscaled.permute(2, 0, 1).unsqueeze(0)
                             else:                    
                                 lr_upscaled = lr_upscaled.permute(3, 0, 1, 2).unsqueeze(0)
