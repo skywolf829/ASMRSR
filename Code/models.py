@@ -1382,6 +1382,29 @@ class ImplicitMLP(nn.Module):
     def forward(self, locations):
         return self.model(locations)
 
+class ACORN(nn.Module):
+    def __init__(self, opt):
+        super(ACORN, self).__init__()        
+        self.opt = opt
+        
+        nodes_per_layer = 128
+        self.n_dims = 2 if "2D" in opt['mode'] else 3
+        self.model = nn.ModuleList([
+            nn.Linear(self.n_dims, nodes_per_layer),
+            nn.LeakyReLU(0.2),
+            nn.Linear(nodes_per_layer, nodes_per_layer),
+            nn.LeakyReLU(0.2),
+            nn.Linear(nodes_per_layer, nodes_per_layer),
+            nn.LeakyReLU(0.2),
+            nn.Linear(nodes_per_layer, opt["num_channels"])
+        ])
+        self.model = nn.Sequential(*self.model)
+        self.apply(weights_init)
+
+    def forward(self, locations):
+        return self.model(locations)
+
+
 class GenericModel(nn.Module):
     def __init__(self, opt):
         super(GenericModel, self).__init__()
