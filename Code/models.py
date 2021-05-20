@@ -8,6 +8,7 @@ from utility_functions import  create_batchnorm_layer, create_conv_layer, weight
 import os
 from options import save_options
 from einops.layers.torch import Rearrange
+from math import pi
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
@@ -1382,24 +1383,82 @@ class ImplicitMLP(nn.Module):
     def forward(self, locations):
         return self.model(locations)
 
+class PositionalEncoding(nn.Module):
+    def __init__(self, opt):
+        super(PositionalEncoding, self).__init__()        
+        self.opt = opt
+        self.n_dims = 2 if "2D" in opt['mode'] else 3
+        self.L = opt['num_positional_encoding_terms']
+        self.L_terms = torch.arange(opt['num_positional_encoding_terms'], 
+            device=opt['device'], dtype=torch.float32)
+
+        self.L_terms = 2**self.L * pi
+
+
+    def forward(self, locations):
+        repeats = list(locations.shape)
+        repeats[:] = 1
+        repeats[-1] = self.L
+        locations = locations.repeat(repeats)
+        locations = locations * self.L_terms
+        locations[..., 0::2] = torch.sin(locations[..., 0::2])
+        locations[..., 1::2] = torch.cos(locations[..., 1::2])
+        return locations
+
 class ACORN(nn.Module):
     def __init__(self, opt):
         super(ACORN, self).__init__()        
         self.opt = opt
-        
         nodes_per_layer = 128
+
         self.n_dims = 2 if "2D" in opt['mode'] else 3
-        self.model = nn.ModuleList([
-            nn.Linear(self.n_dims, nodes_per_layer),
-            nn.LeakyReLU(0.2),
+        self.last_layer_output = opt['feat_grid_channels']*opt['feat_grid_x']*opt['feat_grid_y']
+        if "3D" in opt['mode']:
+            self.last_layer_output *= opt['feat_grid_z']
+
+        self.coordinate_encoder = nn.Sequential(
+            PositionalEncoding(opt),
+            nn.ReLU(),
+            nn.Linear(self.n_dims*opt['num_positional_encoding_terms'], nodes_per_layer),
+            nn.ReLU(),
             nn.Linear(nodes_per_layer, nodes_per_layer),
-            nn.LeakyReLU(0.2),
+            nn.ReLU(),
             nn.Linear(nodes_per_layer, nodes_per_layer),
-            nn.LeakyReLU(0.2),
-            nn.Linear(nodes_per_layer, opt["num_channels"])
-        ])
-        self.model = nn.Sequential(*self.model)
+            nn.ReLU(),
+            nn.Linear(nodes_per_layer, nodes_per_layer),
+            nn.ReLU(),
+            nn.Linear(nodes_per_layer, self.last_layer_output)
+        )
+
+        self.feature_decoder = nn.Sequential(
+            nn.Linear(opt['feat_grid_channels'], nodes_per_layer),
+            nn.ReLU(),
+            nn.Linear(nodes_per_layer, opt['num_channels'])
+        )
+
         self.apply(weights_init)
+
+    def forward(self, global_coordinates, local_coordinates):
+        feat_grid = self.coordinate_encoder(global_coordinates)
+        new_shape = list(feat_grid.shape)
+        new_shape[-1] = self.opt['feat_grid_channels']
+        new_shape.append(self.opt['feat_grid_x'])
+        new_shape.append(self.opt['feat_grid_y'])
+        if "3D" in self.opt['mode']:
+            new_shape.append(self.opt['feat_grid_z'])
+        
+        feat_grid = feat_grid.reshape(new_shape)
+
+        feats = F.grid_sample(feat_grid, local_coordinates, 
+            'bilinear' if "2D" in self.opt['mode'] else "trilinear", 
+            align_corners=True)
+
+class HierarchicalACORN(nn.Module):
+    def __init__(self, opt):
+        super(HierarchicalACORN, self).__init__()        
+        self.opt = opt
+        
+        
 
     def forward(self, locations):
         return self.model(locations)

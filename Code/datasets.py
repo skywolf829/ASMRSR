@@ -180,29 +180,36 @@ class LocalDataset(torch.utils.data.Dataset):
 
         return data
 
-
 class LocalImplicitDataset(torch.utils.data.Dataset):
-    def __init__(self, opt):        
-        self.opt = opt
+    def __init__(self, opt):
         
+        
+        self.num_items = 1
+        self.items = []
+        self.item_names = []
+        self.subsample_dist = 1
         print("Initializing dataset")
         for filename in os.listdir(self.opt['data_folder']):
-            self.item = h5py.File(os.path.join(self.opt['data_folder'], filename), 'r')
-        self.item = torch.tensor(self.item['data'], device=opt['device'])
-        self.coords = make_coord(self.item.shape[1:], opt['device'], flatten=False)        
+            self.item_names.append(filename)
+            self.num_items += 1
+        self.item_names.sort()
+        f = h5py.File(os.path.join(self.opt['data_folder'], self.item_names[0]), 'r')
+        self.num_items = f.shape[1]*f.shape[2]
+        if(opt['mode'] == "3D"):
+            self.num_items *= f.shape[3]
 
-        self.item = self.item.flatten(1).transpose(0,1).contiguous()
-        self.coords = self.coords.flatten(0, 1).contiguous().flip(-1)
+        def __len__(self):
+            return self.num_items
         
-        self.num_items = self.item.shape[0]
-        print("Dataset initialized")
-
-    def __len__(self):
-        return self.num_items
-
     def __getitem__(self, index):
-        return (self.coords[index], self.item[index])
-
+        if(self.opt['load_data_at_start']):
+            data = self.items[index]
+        else:
+            #print("trying to load " + str(self.item_names[index]) + ".h5")
+            f = h5py.File(os.path.join(self.opt['data_folder'], self.item_names[index]), 'r')
+            
+            
+        return data
 
 class LocalTemporalDataset(torch.utils.data.Dataset):
     def __init__(self, opt):
