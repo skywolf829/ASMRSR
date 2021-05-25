@@ -33,7 +33,7 @@ class OctreeNode_nodata:
                 else:
                     y_size = self.shape[3] - int(self.shape[3]/2)
                 if(len(self.shape) == 5):
-                    for z_quad_start in range(0, self.data.shape[4], int(self.shape[4]/2)):
+                    for z_quad_start in range(0, self.shape[4], int(self.shape[4]/2)):
                         if(z_quad_start == 0):
                             z_size = int(self.shape[4]/2)
                         else:
