@@ -1391,7 +1391,7 @@ class PositionalEncoding(nn.Module):
         self.n_dims = 2 if "2D" in opt['mode'] else 3
         self.L = opt['num_positional_encoding_terms']
         self.L_terms = torch.arange(0, opt['num_positional_encoding_terms'], 
-            device=opt['device'], dtype=torch.float32).repeat_interleave(2**self.n_dims)
+            device=opt['device'], dtype=torch.float32).repeat_interleave(2*self.n_dims)
         self.L_terms = torch.pow(2, self.L_terms) * pi
         #self.phase_shift = torch.rand(self.L_terms.shape, 
             #device=opt['device'])
