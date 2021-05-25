@@ -88,7 +88,8 @@ class OctreeNode_nodata:
 
 class OctreeNodeList:
     def __init__(self, data):
-        self.node_list = [OctreeNode_nodata(self, data.shape, [0, 0], 0, 0)]
+        self.node_list = [OctreeNode_nodata(self, 
+            data.shape, [0, 0] if len(data.shape) == 4 else [0, 0, 0], 0, 0)]
         self.data = data
         self.max_depth = 0
 
