@@ -134,6 +134,7 @@ dmypy.json
 /Other
 /Output
 /tensorboard
+/tensorboard_ACORN
 /TestingData
 .vscode/settings.json
 *.npy
