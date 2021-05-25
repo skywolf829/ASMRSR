@@ -1,3 +1,4 @@
+from torch.autograd.grad_mode import F
 from utility_functions import str2bool
 from options import *
 from datasets import LocalDataset, LocalTemporalDataset
@@ -5,6 +6,12 @@ from models import GenericModel, load_model
 from train import TemporalTrainer, Trainer, save_model
 import argparse
 import os
+import h5py
+import imageio
+import numpy as np
+from models import PositionalEncoding
+import torch
+from netCDF4 import Dataset
 
 if __name__ == '__main__':
     file_folder_path = os.path.dirname(os.path.abspath(__file__))
@@ -14,6 +21,7 @@ if __name__ == '__main__':
     output_folder = os.path.join(project_folder_path, "Output")
     save_folder = os.path.join(project_folder_path, "SavedModels")
 
+    '''
     opt = Options.get_default()
     model = GenericModel(opt)
 
@@ -30,4 +38,28 @@ if __name__ == '__main__':
     opt['save_name'] = "RDN5_LIIF_finetune1thru4"
 
     save_model(model, opt)
+    '''
+
+    '''
+    a= imageio.imread("pluto.png")
+    print(a.shape)
+    a = a.swapaxes(1,2).swapaxes(0,1)
+    print(a.shape)
+    a = a.astype(np.float32)[:,::2,::2]
+    a /= 255.0
+    f = h5py.File("pluto.h5", 'w')
+    f['data'] = a
+    f.close()
+    '''
     
+    '''
+    opt = Options.get_default()
+    pe = PositionalEncoding(opt)
+    a = pe(torch.tensor([-0.5, -0.5]).unsqueeze(0).to("cuda"))
+    b = pe(torch.tensor([-0.5, 0.5]).unsqueeze(0).to("cuda"))
+    c = pe(torch.tensor([0.5, -0.5]).unsqueeze(0).to("cuda"))
+    d = pe(torch.tensor([0.5, 0.5]).unsqueeze(0).to("cuda"))
+    print(b - a)
+    print(c - a)
+    print(d - a)
+    '''

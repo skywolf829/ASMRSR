@@ -9,6 +9,7 @@ import os
 from options import save_options
 from einops.layers.torch import Rearrange
 from math import pi
+from pytorch_memlab import LineProfiler, MemReporter, profile
 
 file_folder_path = os.path.dirname(os.path.abspath(__file__))
 project_folder_path = os.path.join(file_folder_path, "..")
@@ -1389,37 +1390,46 @@ class PositionalEncoding(nn.Module):
         self.opt = opt
         self.n_dims = 2 if "2D" in opt['mode'] else 3
         self.L = opt['num_positional_encoding_terms']
-        self.L_terms = torch.arange(opt['num_positional_encoding_terms'], 
-            device=opt['device'], dtype=torch.float32)
-
-        self.L_terms = 2**self.L * pi
-
-
+        self.L_terms = torch.arange(0, opt['num_positional_encoding_terms'], 
+            device=opt['device'], dtype=torch.float32).repeat_interleave(2**self.n_dims)
+        self.L_terms = torch.pow(2, self.L_terms) * pi
+        #self.phase_shift = torch.rand(self.L_terms.shape, 
+            #device=opt['device'])
     def forward(self, locations):
-        repeats = list(locations.shape)
-        repeats[:] = 1
-        repeats[-1] = self.L
+        repeats = len(list(locations.shape)) * [1]
+        repeats[-1] = self.L*2
         locations = locations.repeat(repeats)
-        locations = locations * self.L_terms
-        locations[..., 0::2] = torch.sin(locations[..., 0::2])
-        locations[..., 1::2] = torch.cos(locations[..., 1::2])
+        
+        locations = locations * self.L_terms# + self.phase_shift
+        if(self.n_dims == 2):
+            locations[..., 0::4] = torch.sin(locations[..., 0::4])
+            locations[..., 1::4] = torch.sin(locations[..., 1::4])
+            locations[..., 2::4] = torch.cos(locations[..., 2::4])
+            locations[..., 3::4] = torch.cos(locations[..., 3::4])
+        else:
+            locations[..., 0::6] = torch.sin(locations[..., 0::6])
+            locations[..., 1::6] = torch.sin(locations[..., 1::6])
+            locations[..., 2::6] = torch.sin(locations[..., 2::6])
+            locations[..., 3::6] = torch.cos(locations[..., 3::6])
+            locations[..., 4::6] = torch.cos(locations[..., 4::6])
+            locations[..., 5::6] = torch.cos(locations[..., 5::6])
         return locations
-
+       
 class ACORN(nn.Module):
-    def __init__(self, opt):
+    def __init__(self, nodes_per_layer, opt):
         super(ACORN, self).__init__()        
         self.opt = opt
-        nodes_per_layer = 128
 
         self.n_dims = 2 if "2D" in opt['mode'] else 3
         self.last_layer_output = opt['feat_grid_channels']*opt['feat_grid_x']*opt['feat_grid_y']
         if "3D" in opt['mode']:
             self.last_layer_output *= opt['feat_grid_z']
+        
+        self.positional_encoder = PositionalEncoding(opt)
 
         self.coordinate_encoder = nn.Sequential(
-            PositionalEncoding(opt),
-            nn.ReLU(),
-            nn.Linear(self.n_dims*opt['num_positional_encoding_terms'], nodes_per_layer),
+            #nn.Linear(self.n_dims, nodes_per_layer),
+            nn.Linear(2*self.n_dims*opt['num_positional_encoding_terms'], nodes_per_layer),
             nn.ReLU(),
             nn.Linear(nodes_per_layer, nodes_per_layer),
             nn.ReLU(),
@@ -1431,37 +1441,99 @@ class ACORN(nn.Module):
         )
 
         self.feature_decoder = nn.Sequential(
-            nn.Linear(opt['feat_grid_channels'], nodes_per_layer),
+            nn.Linear(opt['feat_grid_channels'], 32),
             nn.ReLU(),
-            nn.Linear(nodes_per_layer, opt['num_channels'])
+            nn.Linear(32, opt['num_channels'])
         )
 
         self.apply(weights_init)
-
-    def forward(self, global_coordinates, local_coordinates):
-        feat_grid = self.coordinate_encoder(global_coordinates)
-        new_shape = list(feat_grid.shape)
-        new_shape[-1] = self.opt['feat_grid_channels']
-        new_shape.append(self.opt['feat_grid_x'])
-        new_shape.append(self.opt['feat_grid_y'])
+    
+    #@profile
+    def forward(self, global_coordinates, blocks):
+        global_coordinates = self.positional_encoder(global_coordinates)
+        # global coordinates will be B x n_dims
+        all_block_vals = []
+        shape = [global_coordinates.shape[0], self.opt['feat_grid_channels'], 
+            self.opt['feat_grid_x'], self.opt['feat_grid_y']]
         if "3D" in self.opt['mode']:
-            new_shape.append(self.opt['feat_grid_z'])
-        
-        feat_grid = feat_grid.reshape(new_shape)
+            shape.append(self.opt['feat_grid_z'])
+        vals = self.coordinate_encoder(global_coordinates)
+        vals = vals.reshape(shape)
+        for i in range(global_coordinates.shape[0]):
+            b_vals = F.interpolate(vals[i:i+1], size=blocks[i].shape[2:], 
+                mode='bilinear' if "2D" in self.opt['mode'] else "trilinear", 
+                align_corners=False)
+            if "2D" in self.opt['mode']:
+                b_vals = b_vals.permute(0, 2, 3, 1)
+            else:
+                b_vals = b_vals.permute(0, 2, 3, 4, 1)
+            b_vals = self.feature_decoder(b_vals)
+            if "2D" in self.opt['mode']:
+                b_vals = b_vals.permute(0, 3, 1, 2)
+            else:           
+                b_vals = b_vals.permute(0, 4, 1, 2, 3)
 
-        feats = F.grid_sample(feat_grid, local_coordinates, 
-            'bilinear' if "2D" in self.opt['mode'] else "trilinear", 
-            align_corners=True)
+            all_block_vals.append(b_vals)
+        
+        return all_block_vals
 
 class HierarchicalACORN(nn.Module):
     def __init__(self, opt):
         super(HierarchicalACORN, self).__init__()        
         self.opt = opt
+        self.models = nn.ModuleList([ACORN(int(2**(8)), opt)])
+        self.errors = [1]
+        self.residual = None
         
-        
+    def add_model(self, opt):
+        self.models.append(ACORN(int(2**(len(self.models)*0.5+8)), opt))
 
-    def forward(self, locations):
-        return self.model(locations)
+    def forward(self, octree):
+        out = torch.zeros_like(octree.data, device=self.opt['device'])
+        if self.residual is None and len(self.models) > 1:
+            with torch.no_grad():
+                self.residual = torch.zeros_like(octree.data, device=self.opt['device'])
+                for i in range(len(self.models)-1):
+                    blocks, block_positions = octree.depth_to_blocks_and_block_positions(
+                        i+(octree.max_depth-len(self.models)+1))
+
+                    blocks_output = self.models[i](torch.tensor(block_positions, 
+                        device=self.opt['device']), blocks)
+                    for j in range(len(blocks)):
+                        if('2D' in self.opt['mode']):
+                            self.residual[:,:,
+                                int(blocks[j].start_position[0]):int(blocks[j].start_position[0]+blocks_output[j].shape[2]), 
+                                int(blocks[j].start_position[1]):int(blocks[j].start_position[1]+blocks_output[j].shape[3])] \
+                                    += blocks_output[j] * self.errors[i]
+                        else:                    
+                            self.residual[:,:,
+                                blocks[j].start_position[0]:blocks[j].start_position[0]+blocks_output[j].shape[2], 
+                                blocks[j].start_position[1]:blocks[j].start_position[1]+blocks_output[j].shape[3],
+                                blocks[j].start_position[2]:blocks[j].start_position[2]+blocks_output[j].shape[4]] \
+                                    += blocks_output[j] * self.errors[i]
+
+
+        blocks, block_positions = octree.depth_to_blocks_and_block_positions(octree.max_depth)
+        blocks_output = self.models[-1](torch.tensor(block_positions, 
+            device=self.opt['device']), blocks)
+
+        for j in range(len(blocks)):
+            if('2D' in self.opt['mode']):
+                out[:,:,
+                    int(blocks[j].start_position[0]):int(blocks[j].start_position[0]+blocks_output[j].shape[2]), 
+                    int(blocks[j].start_position[1]):int(blocks[j].start_position[1]+blocks_output[j].shape[3])] \
+                        += blocks_output[j] * self.errors[-1]
+            else:                    
+                out[:,:,
+                    blocks[j].start_position[0]:blocks[j].start_position[0]+blocks_output[j].shape[2], 
+                    blocks[j].start_position[1]:blocks[j].start_position[1]+blocks_output[j].shape[3],
+                    blocks[j].start_position[2]:blocks[j].start_position[2]+blocks_output[j].shape[4]] \
+                        += blocks_output[j] * self.errors[-1]
+        
+        if(self.residual is not None):
+            return out + self.residual.detach()
+        else:
+            return out
 
 
 class GenericModel(nn.Module):

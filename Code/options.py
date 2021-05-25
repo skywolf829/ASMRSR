@@ -9,13 +9,13 @@ class Options():
         opt["feat_model"]              = "RDN"      # What SinGAN to use - 2D or 3D
         opt["upscale_model"]           = "LIIF"      # What SinGAN to use - 2D or 3D
         opt['residual_weighing']       = False
-        opt["data_folder"]             = "TrainingData/isomag2D"
+        opt["data_folder"]             = "TrainingData/pluto"
         opt['scaling_mode']            = None # magnitude, channel, learned, none
         opt['load_data_at_start']      = False
         opt['single_shot']            =  False
         opt["save_folder"]             = "SavedModels"
         opt["save_name"]               = "Temp"    # Folder that the model will be saved to
-        opt["num_channels"]            = 1
+        opt["num_channels"]            = 3
         opt["spatial_downscale_ratio"] = 0.5       # Spatial downscale ratio between levels
         opt["min_dimension_size"]      = 16        # Smallest a dimension can go to upscale from
         opt["cropping_resolution"]     = 48
@@ -54,6 +54,11 @@ class Options():
         opt['temporal_direction']     = "forward"
         opt['temporal_generator']     = "TSRTVD"
 
+        opt['feat_grid_channels']       = 16
+        opt['feat_grid_x']              = 32
+        opt['feat_grid_y']              = 32
+        opt['feat_grid_z']              = 32
+        opt['num_positional_encoding_terms'] = 6
 
         opt["n"]                       = 0         # Number of scales in the heirarchy, defined by the input and min_dimension_size
         opt["resolutions"]             = []        # The scales for the GAN
@@ -93,7 +98,7 @@ class Options():
         opt["discriminator_steps"]     = 1
         opt["epochs"]                  = 1000
         opt["minibatch"]               = 1        # Minibatch for training
-        opt["g_lr"]                    = 0.0001    # Learning rate for GAN generator
+        opt["g_lr"]                    = 0.001    # Learning rate for GAN generator
         opt["d_lr"]                    = 0.0004    # Learning rate for GAN discriminator
         opt["beta_1"]                  = 0.5
         opt["beta_2"]                  = 0.999
@@ -103,7 +108,7 @@ class Options():
         opt["scale_in_training"]       = 0
         opt["iteration_number"]        = 0
         opt["epoch_number"]            = 0
-        opt["save_every"]              = 100
+        opt["save_every"]              = 1000
         opt["save_training_loss"]      = True
 
         return opt
