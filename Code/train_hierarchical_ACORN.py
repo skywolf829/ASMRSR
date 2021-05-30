@@ -1,3 +1,4 @@
+from math import log10
 from utility_functions import PSNR, str2bool, ssim
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -17,12 +18,14 @@ from datasets import LocalImplicitDataset
 from models import HierarchicalACORN, PositionalEncoding
 import argparse
 from pytorch_memlab import LineProfiler, MemReporter, profile
+from torch.utils.checkpoint import checkpoint_sequential, checkpoint
 
 class Trainer():
     def __init__(self, opt):
         self.opt = opt
         torch.manual_seed(0b10101010101010101010101010101010)
 
+    #@profile
     def train(self, model, dataset):
         
         print("Training on " + self.opt['device'])
@@ -45,50 +48,111 @@ class Trainer():
         loss = nn.MSELoss().to(self.opt["device"])
         step = 0
         item = dataset[0].unsqueeze(0).to(self.opt['device'])
-        print(item.shape)
+
+        
+        target_PSNR = 40
+        MSE_limit = 10 ** ((-1*target_PSNR + 20*log10(1.0))/10)
+        
         octree = OctreeNodeList(item)
+        model.residual = torch.zeros_like(octree.data, device=self.opt['device']).detach()
+
+        pe = PositionalEncoding(opt)
 
         num_models = 1
         octree_subdiv_start = 4
         for _ in range(octree_subdiv_start):
             octree.next_depth_level()
-
+            
         for model_num in range(num_models):
             for epoch in range(self.opt['epoch_number'], self.opt['epochs']):
                 self.opt["epoch_number"] = epoch            
                 model.zero_grad()            
 
-                reconstructed = model(octree)
-                l = loss(reconstructed, item)
-                l.backward()
+                block_error_sum = 0
+
+                blocks, block_positions = octree.depth_to_blocks_and_block_positions(
+                        octree_subdiv_start + model_num)
+                block_positions = torch.tensor(block_positions, 
+                        device=self.opt['device'])
+                block_positions = pe(block_positions)
+
+                feat_grids = model.models[-1].feature_encoder(block_positions)
+                #feat_grids = checkpoint_sequential(model.models[-1].feature_encoder, 8, block_positions)  
+
+                model.models[-1].feat_grid_shape[0] = feat_grids.shape[0]
+                feat_grids = feat_grids.reshape(model.models[-1].feat_grid_shape)
+                
+                for b in range(len(blocks)):
+                    #print("Block %i/%i" % (b+1, len(blocks)))
+                    block_output = F.interpolate(feat_grids[b:b+1], size=blocks[b].shape[2:], 
+                        mode='bilinear' if "2D" in self.opt['mode'] else "trilinear", 
+                        align_corners=False)
+                    #block_output = checkpoint_sequential(model.models[-1].feature_decoder, 1, block_output)                    
+                    block_output = model.models[-1].feature_decoder(block_output)
+
+                    if('2D' in opt['mode']):
+                        block_output += model.residual[:,:,
+                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
+                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3]].detach()
+                        block_item = item[:,:,
+                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
+                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3]]
+                    else:
+                        block_output += model.residual[:,:,
+                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
+                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3],
+                            blocks[b].start_position[2]:blocks[b].start_position[2]+block_output.shape[4]].detach()
+                        block_item = item[:,:,
+                            blocks[b].start_position[0]:blocks[b].start_position[0]+block_output.shape[2],
+                            blocks[b].start_position[1]:blocks[b].start_position[1]+block_output.shape[3],
+                            blocks[b].start_position[2]:blocks[b].start_position[2]+block_output.shape[4]]
+
+                    block_error = loss(block_output,block_item) * (1/len(blocks))
+                    block_error.backward(retain_graph=True)
+                    block_error_sum += block_error.detach()
+                    
+
+                #block_error_sum *= (1/len(blocks))
+                #block_error_sum.backward()
                 model_optim.step()
                 #optim_scheduler.step()
                 
-                if(step % 50 == 0):
-                    with torch.no_grad():                        
+                if(step % 100 == 0):
+                    with torch.no_grad():    
+                        reconstructed = model.get_full_img(octree)                    
                         psnr = PSNR(reconstructed, item, torch.tensor(1.0))
                         s = ssim(reconstructed, item)
                         print("Iteration %i, MSE: %0.04f, PSNR (dB): %0.02f, SSIM: %0.02f" % \
-                            (epoch, l.item(), psnr.item(), s.item()))
-                        writer.add_scalar('MSE', l.item(), step)
+                            (epoch, block_error_sum.item(), psnr.item(), s.item()))
+                        writer.add_scalar('MSE', block_error_sum.item(), step)
                         writer.add_scalar('PSNR', psnr.item(), step)
                         writer.add_scalar('SSIM', s.item(), step)             
                         if(len(model.models) > 1):
                             writer.add_image("Network"+str(len(model.models)-1)+"residual", 
-                                (reconstructed-model.residual)[0].clamp_(0, 1), step)
+                                ((reconstructed-model.residual)[0]+0.5).clamp_(0, 1), step)
                         writer.add_image("reconstruction", reconstructed[0].clamp_(0, 1), step)
+                elif(step % 5 == 0):
+                    print("Iteration %i, MSE: %0.04f" % \
+                            (epoch, block_error_sum.item()))
                 step += 1
             
                 if(epoch % self.opt['save_every'] == 0):
                     save_model(model, self.opt)
-                    print("Saved model")
+                    octree.save(self.opt)
+                    print("Saved model and octree")
 
             if(model_num < num_models-1):
-                print("Adding higher-resolution model")
-                model.errors.append(l.detach().item())
+                print("Adding higher-resolution model")   
+                with torch.no_grad():                                    
+                    model.residual = model.get_full_img(octree).detach()
+                    model.calculate_block_errors(octree, loss)
                 model.add_model(opt)
                 model.to(opt['device'])
-                octree.next_depth_level()
+                print("Last error: " + str(block_error_sum.item()))
+                #model.errors.append(block_error_sum.item()**0.5)
+                model.errors.append(1.0)
+                #octree.next_depth_level()
+                octree.split_from_error(MSE_limit)
                 model_optim = optim.Adam(model.models[-1].parameters(), lr=self.opt["g_lr"], 
                     betas=(self.opt["beta_1"],self.opt["beta_2"]))
                 #optim_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer=model_optim,
@@ -99,7 +163,7 @@ class Trainer():
                 for param in model.models[-2].parameters():
                     param.requires_grad = False
                 self.opt['epoch_number'] = 0
-                model.residual = None
+                torch.cuda.empty_cache()
        
 
         end_time = time.time()

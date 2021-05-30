@@ -1,5 +1,13 @@
 import torch
 from typing import List, Tuple
+import os
+
+file_folder_path = os.path.dirname(os.path.abspath(__file__))
+project_folder_path = os.path.join(file_folder_path, "..")
+
+input_folder = os.path.join(project_folder_path, "TrainingData")
+output_folder = os.path.join(project_folder_path, "Output")
+save_folder = os.path.join(project_folder_path, "SavedModels")
 
 class OctreeNode_nodata:
     def __init__(self, node_list, 
@@ -19,7 +27,7 @@ class OctreeNode_nodata:
         "depth: " + str(self.depth) + ", " + \
         "index: " + str(self.index) + "}" 
 
-    def split(self):
+    def split(self, n_dims):
         nodes = []
         k = 0
         for x_quad_start in range(0, self.shape[2], int(self.shape[2]/2)):
@@ -32,7 +40,7 @@ class OctreeNode_nodata:
                     y_size = int(self.shape[3]/2)
                 else:
                     y_size = self.shape[3] - int(self.shape[3]/2)
-                if(len(self.shape) == 5):
+                if(n_dims == 3):
                     for z_quad_start in range(0, self.shape[4], int(self.shape[4]/2)):
                         if(z_quad_start == 0):
                             z_size = int(self.shape[4]/2)
@@ -50,7 +58,7 @@ class OctreeNode_nodata:
                                 self.start_position[2]+z_quad_start
                             ],
                             self.depth+1,
-                            self.index*8 + k
+                            self.index*(2**n_dims) + k
                         )
                         nodes.append(n_quad)
                         k += 1     
@@ -66,7 +74,7 @@ class OctreeNode_nodata:
                             self.start_position[1]+y_quad_start,
                         ],
                         self.depth+1,
-                        self.index*4 + k
+                        self.index*(2**n_dims) + k
                     )
                     nodes.append(n_quad)
                     k += 1       
@@ -121,13 +129,13 @@ class OctreeNodeList:
                 found = True
                 index = i
             i += 1
-        split_nodes = self.node_list[index].split()
+        split_nodes = self.node_list[index].split(2 if len(self.data.shape) == 4 else 3)
 
         for i in range(len(split_nodes)):
             self.append(split_nodes[i])
     
     def split_index(self, ind : int):
-        split_nodes = self.node_list[ind].split()
+        split_nodes = self.node_list[ind].split(2 if len(self.data.shape) == 4 else 3)
 
         for i in range(len(split_nodes)):
             self.append(split_nodes[i])
@@ -143,14 +151,17 @@ class OctreeNodeList:
         
         self.max_depth += 1
 
-    def split_from_error(self, loss_value = 0.01):
-        node_indices_to_split = []
-        for i in range(len(self.node_list)):
-            if self.node_list[i].last_loss > loss_value:
-                node_indices_to_split.append(i)
-
-        for i in range(len(node_indices_to_split)):
-            self.split_index(node_indices_to_split[i])
+    def split_from_error(self, max_error):
+        blocks = self.get_blocks_at_depth(self.max_depth)
+        did_split = False
+        for i in range(len(blocks)):
+            if blocks[i].error > max_error:
+                did_split = True
+                split_nodes = blocks[i].split(2 if len(self.data.shape) == 4 else 3)
+                for j in range(len(split_nodes)):
+                    self.append(split_nodes[j])
+        if did_split:
+            self.max_depth += 1
 
     def get_blocks_at_depth(self, depth_level):
         blocks = []
@@ -194,3 +205,18 @@ class OctreeNodeList:
         for i in range(len(self.node_list)):
             nbytes += self.node_list[i].size()
         return nbytes 
+
+    def save(self, opt):
+        a = self.data
+        self.data = None
+        folder_to_save_in = os.path.join(save_folder, opt['save_name'])
+        if(not os.path.exists(folder_to_save_in)):
+            os.makedirs(folder_to_save_in)
+        print("Saving octree to %s" % (folder_to_save_in))
+
+        torch.save(self, os.path.join(folder_to_save_in, "octree.data"))
+        self.data = a
+    
+    def load(self, location):
+        self = torch.load(os.path.join(location, "octree.data"))
+        return self

@@ -323,8 +323,9 @@ def to_img(input : torch.Tensor, mode : str, colormap = True, normalize=True):
     #print(img.shape)
     return img
 
+# From https://gist.github.com/peteflorence/a1da2c759ca1ac2b74af9a83f69ce20e
 def bilinear_interpolate(im, x, y):
-    dtype = torch.cuda.FloatTensor
+    dtype = im.dtype
     dtype_long = torch.cuda.LongTensor
     
     x0 = torch.floor(x).type(dtype_long)

@@ -9,7 +9,7 @@ class Options():
         opt["feat_model"]              = "RDN"      # What SinGAN to use - 2D or 3D
         opt["upscale_model"]           = "LIIF"      # What SinGAN to use - 2D or 3D
         opt['residual_weighing']       = False
-        opt["data_folder"]             = "TrainingData/pluto"
+        opt["data_folder"]             = "TrainingData/Snickers"
         opt['scaling_mode']            = None # magnitude, channel, learned, none
         opt['load_data_at_start']      = False
         opt['single_shot']            =  False
